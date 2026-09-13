@@ -164,8 +164,10 @@ class SystemEngine {
 // Neural voices (Kokoro-82M running locally in a Web Worker)
 // ---------------------------------------------------------------------------
 
-const KOKORO_URL = 'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js';
-const KOKORO_MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX';
+// Resolved against this script so it works when the app lives in a subfolder.
+const KOKORO_WORKER_URL = new URL('kokoro-worker.js', (document.currentScript && document.currentScript.src) || location.href).href;
+// Generous: jobs run one at a time, so a request can wait behind prefetches on slow CPUs.
+const GENERATE_TIMEOUT_MS = 120000;
 
 const KOKORO_VOICES = [
   { id: 'af_heart', name: 'Heart', accent: 'US', gender: 'F', grade: 'A' },
@@ -195,41 +197,6 @@ const KOKORO_VOICES = [
 ];
 const KOKORO_BEST = KOKORO_VOICES.filter((v) => /^[ABC]/.test(v.grade) && v.grade !== 'C-').map((v) => v.id);
 
-// Built as a Blob so the app also works when index.html is opened from disk.
-const KOKORO_WORKER_SOURCE = `
-let tts = null;
-let chain = Promise.resolve();
-self.onmessage = (event) => {
-  const msg = event.data;
-  if (msg.type === 'load') {
-    (async () => {
-      try {
-        const { KokoroTTS } = await import(${JSON.stringify(KOKORO_URL)});
-        tts = await KokoroTTS.from_pretrained(${JSON.stringify(KOKORO_MODEL)}, {
-          dtype: msg.dtype,
-          device: msg.device,
-          progress_callback: (p) => self.postMessage({ type: 'progress', p }),
-        });
-        // Warm up so the first real message isn't slow.
-        await tts.generate('Hi.', { voice: 'af_heart' });
-        self.postMessage({ type: 'ready' });
-      } catch (err) {
-        self.postMessage({ type: 'loadError', error: String((err && err.message) || err) });
-      }
-    })();
-  } else if (msg.type === 'generate') {
-    chain = chain.then(async () => {
-      try {
-        const out = await tts.generate(msg.text, { voice: msg.voice, speed: msg.speed });
-        const samples = out.audio;
-        self.postMessage({ type: 'audio', id: msg.id, samples, sampleRate: out.sampling_rate }, [samples.buffer]);
-      } catch (err) {
-        self.postMessage({ type: 'genError', id: msg.id, error: String((err && err.message) || err) });
-      }
-    });
-  }
-};
-`;
 
 class KokoroEngine {
   constructor({ onState }) {
@@ -278,24 +245,52 @@ class KokoroEngine {
     this.files.clear();
     this.setState('loading', { progress: 0, device });
 
-    const url = URL.createObjectURL(new Blob([KOKORO_WORKER_SOURCE], { type: 'text/javascript' }));
-    const worker = new Worker(url, { type: 'module' });
-    URL.revokeObjectURL(url);
+    if (!window.isSecureContext) {
+      const error = 'neural voices need the page to be served over HTTPS';
+      this.setState('error', { error, device });
+      return Promise.reject(new Error(error));
+    }
+
+    let worker;
+    try {
+      worker = new Worker(KOKORO_WORKER_URL, { type: 'module' });
+    } catch (err) {
+      const error = `voice worker could not be created (${err.message})`;
+      this.setState('error', { error, device });
+      return Promise.reject(new Error(error));
+    }
     this.worker = worker;
+    let started = false;
 
     return new Promise((resolve, reject) => {
+      const fail = (rawError) => {
+        let error = rawError;
+        if (/Content Security Policy/i.test(rawError) && /WebAssembly|unsafe-eval/i.test(rawError)) {
+          console.warn(rawError);
+          error = "the site's Content-Security-Policy blocks WebAssembly. Add 'wasm-unsafe-eval' to script-src (see Caddyfile)";
+        }
+        this.setState('error', { error, device });
+        this.terminate();
+        reject(new Error(error));
+      };
+
       worker.onmessage = ({ data }) => {
         if (this.worker !== worker) return;
         switch (data.type) {
+          case 'started': started = true; break;
           case 'progress': this.onProgress(data.p); break;
           case 'ready':
             this.setState('ready', { device });
             resolve();
             break;
           case 'loadError':
-            this.setState('error', { error: data.error, device });
-            this.terminate();
-            reject(new Error(data.error));
+            fail(data.error);
+            break;
+          case 'fatal':
+            console.warn('Voice worker error:', data.error);
+            // Before ready this is a load failure. After, stray errors are
+            // logged only; a failed generation rejects or times out on its own.
+            if (this.state !== 'ready') fail(data.error);
             break;
           case 'audio':
           case 'genError': {
@@ -310,10 +305,10 @@ class KokoroEngine {
       };
       worker.onerror = (e) => {
         if (this.worker !== worker) return;
-        const error = e.message || 'Worker failed to start';
-        this.setState('error', { error, device });
-        this.terminate();
-        reject(new Error(error));
+        e.preventDefault();
+        if (e.message) fail(e.message);
+        else if (!started) fail(`voice worker script didn't load. Check that ${KOKORO_WORKER_URL} opens in the browser as JavaScript, and that no Content-Security-Policy blocks workers or cdn.jsdelivr.net`);
+        else fail('voice worker stopped unexpectedly');
       };
       worker.postMessage({ type: 'load', device, dtype: device === 'webgpu' ? 'fp32' : 'q8' });
     });
@@ -357,7 +352,15 @@ class KokoroEngine {
     const key = `${voice}|${speed.toFixed(3)}|${text}`;
     if (this.cache.has(key)) return this.cache.get(key);
     const id = ++this.seq;
-    const promise = new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+    const promise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) reject(new Error('Speech generation timed out'));
+      }, GENERATE_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
+    });
     promise.catch(() => this.cache.delete(key));
     this.worker.postMessage({ type: 'generate', id, text, voice, speed });
     this.cache.set(key, promise);

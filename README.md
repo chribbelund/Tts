@@ -14,7 +14,16 @@ Then open http://localhost:8765. You can also put the folder on any static host,
 
 Add `?channel=name` to the URL to prefill a channel, e.g. `http://localhost:8765/?channel=shroud`.
 
-Chrome or Edge is recommended.
+Chrome or Edge is recommended. Neural voices need HTTPS, or `localhost`.
+
+## Deploying (Coolify, Railway, any static host)
+
+The server's Content-Security-Policy must allow three things:
+- WebAssembly (`'wasm-unsafe-eval'` in `script-src`)
+- workers (`worker-src 'self' blob:`)
+- `blob:` audio (`media-src`)
+
+Coolify and Railway build static sites with Railpack. Railpack's default Caddy config sends a CSP that blocks all three, which shows up as "Couldn't load … Using system voices". The `Caddyfile` in this folder replaces that default: Railpack picks it up automatically from the project root. On other hosts, copy the `Content-Security-Policy` value from it.
 
 ## Features
 
@@ -50,4 +59,6 @@ For system voices, Microsoft Edge offers the most natural free options, the "…
 - `js/irc.js`: anonymous Twitch chat connection (IRC over WebSocket)
 - `js/speech-text.js`: turns chat messages into natural spoken sentences
 - `js/engines.js`: the neural and system speech engines, both supporting pause and resume
+- `js/kokoro-worker.js`: runs the neural voice model in the background
+- `Caddyfile`: server config with a CSP that allows the neural voices
 - `js/app.js`: queue, pause logic, settings, keybindings

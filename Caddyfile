@@ -1,0 +1,56 @@
+# Replaces Railpack's default static-site Caddyfile (used by Coolify).
+# Identical except for the Content-Security-Policy, which the neural voices need:
+#   'wasm-unsafe-eval'   the voice model runs on WebAssembly
+#   worker-src blob:     the voice worker and ONNX runtime helpers
+#   media-src blob:      voice previews and the media-key audio loop
+#   connect-src wss:     Twitch chat, plus https: for the model download
+
+{
+	admin off
+	persist_config off
+	auto_https off
+
+	log {
+		format json
+	}
+
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+:{$PORT:80} {
+	log {
+		format json
+	}
+
+	respond /health 200
+
+	header {
+		X-XSS-Protection "1; mode=block"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; connect-src 'self' https: wss://irc-ws.chat.twitch.tv; media-src 'self' blob: data:; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'self';"
+		-Server
+	}
+
+	root * {{.StaticFileRoot}}
+
+	file_server {
+		hide .git
+		hide .env*
+		hide Caddyfile
+	}
+
+	encode {
+		gzip
+		zstd
+	}
+
+	try_files {path} {path}.html {path}/index.html
+
+	handle_errors {
+		rewrite * /{err.status_code}.html
+		file_server
+	}
+}
