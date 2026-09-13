@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat Reader · Twitch TTS</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Chat Reader</div>
+  <form id="connectForm" class="connect" autocomplete="off">
+    <input id="channelInput" placeholder="Channel name or twitch.tv link" spellcheck="false" aria-label="Twitch channel">
+    <button id="connectBtn" type="submit" class="btn primary">Connect</button>
+  </form>
+  <div id="status" class="status" data-state="idle"><span class="dot"></span><span id="statusText">Not connected</span></div>
+</header>
+
+<main class="layout">
+  <div class="col-main">
+
+    <section class="panel now" id="nowPanel" data-state="idle">
+      <div class="now-top">
+        <button id="pauseBtn" class="pause-btn" aria-pressed="false" title="Pause / resume">
+          <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="4.5" width="4" height="15" rx="1.2"/><rect x="14" y="4.5" width="4" height="15" rx="1.2"/></svg>
+          <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4.8v14.4a1 1 0 0 0 1.5.86l11.3-7.2a1 1 0 0 0 0-1.72L9.5 3.94A1 1 0 0 0 8 4.8z"/></svg>
+        </button>
+        <div class="now-body">
+          <div class="now-label"><span id="nowLabel">Idle</span><span class="sep">·</span><span id="queueCount">0 waiting</span></div>
+          <div class="now-msg" id="nowMsg"><span class="muted">Nothing is being read right now.</span></div>
+          <div class="progress"><i id="nowBar"></i></div>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="btn-row">
+          <button id="skipBtn" class="btn">Skip</button>
+          <button id="clearBtn" class="btn">Clear queue</button>
+        </div>
+        <label class="slider">
+          <span>Volume</span>
+          <input type="range" id="volume" min="0" max="100" step="1">
+          <output id="volumeOut">80%</output>
+        </label>
+        <label class="slider">
+          <span>Speed</span>
+          <input type="range" id="rate" min="0.6" max="2" step="0.05">
+          <output id="rateOut">1.00×</output>
+        </label>
+      </div>
+      <div class="key-hint">Pause/resume <kbd data-key-label="pause"></kbd> <span class="sep">·</span> Skip <kbd data-key-label="skip"></kbd></div>
+    </section>
+
+    <section class="panel feed-panel">
+      <div class="feed-head">
+        <h2>Chat</h2>
+        <button id="testBtn" class="btn ghost small">Add test messages</button>
+      </div>
+      <ol id="feed" class="feed" aria-live="off"></ol>
+      <div id="feedEmpty" class="empty">Enter a channel above and press Connect. Messages show up here as they arrive and are read in order.</div>
+    </section>
+  </div>
+
+  <aside class="col-side">
+    <section class="panel settings">
+      <h2>Voices</h2>
+
+      <div class="field">
+        <div class="seg" role="radiogroup" aria-label="Voice engine">
+          <label><input type="radio" name="engine" value="kokoro"><span>Neural</span></label>
+          <label><input type="radio" name="engine" value="system"><span>System</span></label>
+        </div>
+        <p class="hint" id="engineHint"></p>
+      </div>
+
+      <div id="kokoroBox" class="field">
+        <label class="row-label" for="kokoroMode">Neural model</label>
+        <select id="kokoroMode">
+          <option value="auto">Auto (GPU if available)</option>
+          <option value="webgpu">GPU · fastest · 326 MB</option>
+          <option value="wasm">CPU · 92 MB</option>
+        </select>
+        <div class="load-row">
+          <button id="kokoroLoadBtn" class="btn small">Load neural voices</button>
+          <span id="kokoroStatus" class="hint"></span>
+        </div>
+        <div class="progress thin" id="kokoroProgressWrap" hidden><i id="kokoroProgress"></i></div>
+      </div>
+
+      <div id="systemBox" class="field">
+        <label class="row-label" for="systemLang">Language</label>
+        <select id="systemLang"></select>
+      </div>
+
+      <div class="field">
+        <div class="row-label with-actions">
+          <span>Voice pool <span class="hint" id="poolCount"></span></span>
+          <span class="mini-actions">
+            <button type="button" class="link" id="poolBest">Best</button>
+            <button type="button" class="link" id="poolAll">All</button>
+          </span>
+        </div>
+        <ul id="voiceList" class="voice-list"></ul>
+        <p class="hint">Each chatter keeps the same voice. Click the voice tag on a message to give that chatter another one.</p>
+      </div>
+
+      <label class="check"><input type="checkbox" id="varyVoices"> Vary pitch and pace a little per chatter</label>
+
+      <h2>Reading</h2>
+      <div class="field">
+        <label class="row-label" for="nameFormat">Names</label>
+        <select id="nameFormat">
+          <option value="colon">“Name: message”</option>
+          <option value="says">“Name says message”</option>
+          <option value="none">Message only</option>
+        </select>
+      </div>
+      <label class="check"><input type="checkbox" id="collapseNames"> Don’t repeat the name for back-to-back messages</label>
+      <label class="check"><input type="checkbox" id="quoteParent"> For replies, also read the message being replied to</label>
+      <label class="check"><input type="checkbox" id="readEvents"> Read subs, raids and announcements</label>
+      <label class="check"><input type="checkbox" id="readEmojis"> Read emojis</label>
+      <div class="field inline">
+        <label for="maxLength">Cut messages after</label>
+        <input type="number" id="maxLength" min="20" max="500" step="10"> <span class="hint">characters</span>
+      </div>
+      <div class="field inline">
+        <label for="catchUp">Skip old messages when more than</label>
+        <input type="number" id="catchUp" min="0" max="500" step="1"> <span class="hint">waiting (0 = read everything)</span>
+      </div>
+
+      <h2>Filters</h2>
+      <label class="check"><input type="checkbox" id="skipCommands"> Skip bot commands (starting with !)</label>
+      <label class="check"><input type="checkbox" id="skipLinks"> Skip messages with links</label>
+      <div class="field">
+        <label class="row-label" for="ignoredUsers">Ignored chatters</label>
+        <textarea id="ignoredUsers" rows="2" spellcheck="false" placeholder="e.g. streamerbot, sery_bot"></textarea>
+      </div>
+
+      <h2>Keys</h2>
+      <div class="field keybind">
+        <span>Pause / resume</span>
+        <button type="button" class="btn small keycap" data-bind="pause"></button>
+      </div>
+      <div class="field keybind">
+        <span>Skip message</span>
+        <button type="button" class="btn small keycap" data-bind="skip"></button>
+      </div>
+      <label class="check"><input type="checkbox" id="mediaKeys"> Use the keyboard’s ⏯ media key too, which works while other apps are focused</label>
+      <p class="hint">Normal shortcuts work while this tab is focused. The media key also works while you’re in a game.</p>
+    </section>
+  </aside>
+</main>
+
+<div id="gate" class="gate" hidden>
+  <button id="gateBtn" class="btn primary">Click to start reading <span id="gateChannel"></span></button>
+</div>
+
+<script src="js/irc.js"></script>
+<script src="js/speech-text.js"></script>
+<script src="js/engines.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
