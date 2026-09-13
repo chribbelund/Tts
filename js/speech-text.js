@@ -32,9 +32,16 @@ function removeEmotes(text, emotesTag) {
   return chars.join('');
 }
 
-// Prefer the display name, but fall back to the login when the display name
-// uses a script the voice probably can't pronounce. Underscores read badly.
-function speakableName(displayName, login) {
+function normalizeLogin(name) {
+  return (name || '').trim().replace(/^@/, '').toLowerCase();
+}
+
+// A nickname set by the user wins. Otherwise prefer the display name, but fall
+// back to the login when the display name uses a script the voice probably
+// can't pronounce. Underscores read badly.
+function speakableName(displayName, login, nicknames) {
+  const nickname = nicknames && (nicknames[normalizeLogin(login)] || nicknames[normalizeLogin(displayName)]);
+  if (nickname) return nickname;
   const name = displayName && /^[\x20-\x7E]+$/.test(displayName) ? displayName : (login || displayName || 'someone');
   return name.replace(/_+/g, ' ').trim() || login || 'someone';
 }
@@ -52,11 +59,11 @@ function truncateAtWord(text, max) {
   return (space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,.;:!?-]+$/, '') + '…';
 }
 
-function cleanForSpeech(text, { readEmojis = false, maxLength = 0 } = {}) {
+function cleanForSpeech(text, { readEmojis = false, maxLength = 0, nicknames = null } = {}) {
   let t = text;
   t = t.replace(URL_RE, ' link ');
   if (!readEmojis) t = t.replace(EMOJI_RE, ' ');
-  t = t.replace(/@([\w]+)/g, (_, name) => name.replace(/_+/g, ' '));
+  t = t.replace(/@([\w]+)/g, (_, name) => (nicknames && nicknames[name.toLowerCase()]) || name.replace(/_+/g, ' '));
   // "noooooooo" -> "nooo", "!!!!!!!" -> "!!!" (leave digits alone)
   t = t.replace(/([^\d\s])\1{3,}/gu, '$1$1$1');
   // "lol lol lol lol lol" -> "lol lol lol"
@@ -99,13 +106,18 @@ function splitIntoChunks(text, max = 180) {
  * Returns '' when there is nothing worth saying (e.g. emote-only message).
  */
 function composeSpeech(entry, prev, settings) {
-  const opts = { readEmojis: settings.readEmojis, maxLength: settings.maxLength };
-  const name = speakableName(entry.displayName, entry.login);
+  const nicknames = settings.nicknames || {};
+  const opts = { readEmojis: settings.readEmojis, maxLength: settings.maxLength, nicknames };
+  const name = speakableName(entry.displayName, entry.login, nicknames);
   const body = cleanForSpeech(entry.speechBody, opts);
 
   if (entry.kind === 'event') {
-    const system = cleanForSpeech(entry.systemText || '', { readEmojis: false });
-    return [system, body].filter(Boolean).join('. ');
+    let systemText = entry.systemText || '';
+    const nickname = nicknames[normalizeLogin(entry.login)];
+    if (nickname && entry.displayName) systemText = systemText.split(entry.displayName).join(nickname);
+    const system = cleanForSpeech(systemText, { readEmojis: false, nicknames });
+    if (!system || !body) return system || body;
+    return /[.!?…]$/.test(system) ? `${system} ${body}` : `${system}. ${body}`;
   }
 
   if (entry.kind === 'announcement') {
@@ -117,12 +129,12 @@ function composeSpeech(entry, prev, settings) {
   if (entry.action) return `${name} ${body}`;
 
   if (entry.isReply) {
-    const parent = speakableName(entry.parentDisplayName, entry.parentLogin);
+    const parent = speakableName(entry.parentDisplayName, entry.parentLogin, nicknames);
     let lead = settings.nameFormat === 'none'
       ? `Reply to ${parent}`
       : `${name}, replying to ${parent}`;
     if (settings.quoteParent && entry.parentBody) {
-      const quoted = cleanForSpeech(entry.parentBody.replace(/^\s*@\S+\s*/, ''),{ readEmojis: false, maxLength: 90 });
+      const quoted = cleanForSpeech(entry.parentBody.replace(/^\s*@\S+\s*/, ''),{ readEmojis: false, maxLength: 90, nicknames });
       if (quoted) lead += `, who said, “${quoted}”`;
     }
     return `${lead}: ${body}`;

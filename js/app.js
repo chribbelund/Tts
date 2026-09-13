@@ -33,6 +33,7 @@ const DEFAULTS = {
   },
   mediaKeys: false,
   userVoices: { kokoro: {}, system: {} },
+  nicknames: {}, // twitch login -> spoken name
 };
 
 function loadSettings() {
@@ -43,6 +44,7 @@ function loadSettings() {
       ...saved,
       keys: { ...DEFAULTS.keys, ...(saved.keys || {}) },
       userVoices: { kokoro: {}, system: {}, ...(saved.userVoices || {}) },
+      nicknames: { ...(saved.nicknames || {}) },
     };
   } catch {
     return structuredClone(DEFAULTS);
@@ -403,7 +405,13 @@ function addToFeed(entry) {
     onclick: () => removeFromQueue(entry, 'skipped', 'removed'),
   }, '×');
 
-  const name = el('span', { class: 'name', style: entry.color ? `--c:${entry.color}` : '' }, entry.displayName);
+  const name = el('button', {
+    class: 'name',
+    type: 'button',
+    title: 'Set a nickname',
+    style: entry.color ? `--c:${entry.color}` : '',
+    onclick: () => editNickname(entry.login),
+  }, entry.displayName);
   const meta = el('div', { class: 'meta' },
     entry.kind === 'event' ? el('span', { class: 'reply-to' }, 'Event') : name,
     entry.kind === 'announcement' ? el('span', { class: 'reply-to' }, 'announcement') : null,
@@ -462,7 +470,7 @@ function cycleUserVoice(entry) {
   settings.userVoices[engine.id][entry.login] = next;
   saveSettings();
   for (const e of feedEntries) if (e.login === entry.login && e.status !== 'done') updateVoiceTag(e);
-  engine.preview && previewVoice(engine, next, `This is how ${speakableName(entry.displayName, entry.login)} sounds now.`);
+  engine.preview && previewVoice(engine, next, `This is how ${speakableName(entry.displayName, entry.login, settings.nicknames)} sounds now.`);
 }
 
 const nowPanel = $('#nowPanel');
@@ -676,6 +684,75 @@ function renderKokoroState(state, info) {
     status.textContent = `Couldn't load: ${info.error || 'unknown error'}. Using system voices.`;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Nicknames
+// ---------------------------------------------------------------------------
+
+function renderNicknames() {
+  const rows = Object.entries(settings.nicknames).sort((a, b) => a[0].localeCompare(b[0]));
+  $('#nicknameList').replaceChildren(...rows.map(([login, nickname]) => el('li', { 'data-login': login },
+    el('span', { class: 'nick-user', title: login }, login),
+    el('span', { class: 'nick-arrow', 'aria-hidden': 'true' }, '→'),
+    el('input', {
+      value: nickname,
+      spellcheck: 'false',
+      'aria-label': `Nickname for ${login}`,
+      onchange: (e) => setNickname(login, e.target.value),
+    }),
+    el('button', { class: 'play', type: 'button', title: 'Hear it', onclick: () => previewNickname(login) }, '▶'),
+    el('button', { class: 'x', type: 'button', title: `Remove nickname for ${login}`, onclick: () => setNickname(login, '') }, '×'),
+  )));
+  $('#nicknameEmpty').hidden = rows.length > 0;
+}
+
+function setNickname(login, nickname) {
+  const key = normalizeLogin(login);
+  if (!key) return;
+  const value = nickname.trim();
+  if (value) settings.nicknames[key] = value;
+  else delete settings.nicknames[key];
+  saveSettings();
+  renderNicknames();
+}
+
+function previewNickname(login) {
+  const engine = activeEngine();
+  previewVoice(engine, voiceIdFor(login, engine), speakableName('', login, settings.nicknames));
+}
+
+// From a click on a chatter's name: edit their nickname, or start a new one.
+function editNickname(login) {
+  if (!login) return;
+  const existing = $(`#nicknameList li[data-login="${CSS.escape(login)}"] input`);
+  if (!existing) $('#nickUser').value = login;
+  const target = existing || $('#nickName');
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  target.focus({ preventScroll: true });
+  target.select();
+}
+
+$('#nicknameForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const userInput = $('#nickUser');
+  const nameInput = $('#nickName');
+  const login = normalizeLogin(userInput.value);
+  userInput.setCustomValidity('');
+  if (!/^[a-z0-9_]{1,25}$/.test(login)) {
+    userInput.setCustomValidity('Enter a Twitch username (letters, numbers, underscores)');
+    userInput.reportValidity();
+    return;
+  }
+  if (!nameInput.value.trim()) {
+    nameInput.focus();
+    return;
+  }
+  setNickname(login, nameInput.value);
+  userInput.value = '';
+  nameInput.value = '';
+  userInput.focus();
+});
+$('#nickUser').addEventListener('input', (e) => e.target.setCustomValidity(''));
 
 // ---------------------------------------------------------------------------
 // Keyboard shortcuts and media keys
@@ -992,6 +1069,7 @@ if (systemEngine.supported) {
 renderLanguageOptions();
 renderEngineUI();
 renderKeyLabels();
+renderNicknames();
 renderNow();
 
 {

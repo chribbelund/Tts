@@ -36,6 +36,7 @@ Coolify and Railway build static sites with Railpack. Railpack's default Caddy c
 - **Media key:** turn on *Use the keyboard's ⏯ media key* to pause and resume while a game or another app is focused. Normal shortcuts only work while the tab is focused, which is a browser limitation.
 - **Volume and speed:** with neural voices, volume changes apply instantly.
 - **Multiple voices:** each chatter gets a consistent voice from the pool, with a slight per-chatter pitch and pace variation. Click the voice tag on a message to give that chatter a different voice.
+- **Nicknames:** map a Twitch username to the name you want spoken. It applies to their messages, to replies to them, to @mentions and to their sub/raid events. Click a name in chat to add one quickly.
 - **Moderation aware:** messages deleted by mods, and messages from banned or timed-out users, are removed from the queue.
 - **Filters:** skip `!commands`, links and specific chatters. You can also cap message length and skip old messages when chat is too fast.
 - **Cleanup:** emotes and emojis are stripped, links become "link", and spam like `loooooool` or repeated words is shortened.

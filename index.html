@@ -128,6 +128,17 @@
         <input type="number" id="catchUp" min="0" max="500" step="1"> <span class="hint">waiting (0 = read everything)</span>
       </div>
 
+      <h2>Nicknames</h2>
+      <p class="hint">Say a different name for a chatter, in their messages, in replies and in @mentions. Click a name in chat to add it here.</p>
+      <ul id="nicknameList" class="nick-list"></ul>
+      <p id="nicknameEmpty" class="hint nick-empty">No nicknames yet.</p>
+      <form id="nicknameForm" class="nick-add" autocomplete="off" novalidate>
+        <input id="nickUser" placeholder="Twitch username" spellcheck="false" aria-label="Twitch username">
+        <span class="nick-arrow" aria-hidden="true">→</span>
+        <input id="nickName" placeholder="Say as" spellcheck="false" aria-label="Nickname">
+        <button type="submit" class="btn small">Add</button>
+      </form>
+
       <h2>Filters</h2>
       <label class="check"><input type="checkbox" id="skipCommands"> Skip bot commands (starting with !)</label>
       <label class="check"><input type="checkbox" id="skipLinks"> Skip messages with links</label>
