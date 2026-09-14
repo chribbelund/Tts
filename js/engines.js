@@ -161,6 +161,62 @@ class SystemEngine {
 }
 
 // ---------------------------------------------------------------------------
+// Graphics acceleration check (GPU neural voices need it)
+// ---------------------------------------------------------------------------
+
+const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|lavapipe|software|basic render/i;
+let graphicsCheck = null;
+
+/**
+ * Resolves (once, cached) to:
+ *   gpuUsable    WebGPU with a real hardware adapter
+ *   accelerated  false = graphics acceleration is off / software rendering,
+ *                true = hardware rendering, null = couldn't tell
+ *   webgpu       the browser exposes a WebGPU adapter at all
+ *   renderer     WebGL renderer name, for debugging
+ */
+function detectGraphics() {
+  if (graphicsCheck) return graphicsCheck;
+  graphicsCheck = (async () => {
+    let webgpu = false;
+    let fallbackAdapter = false;
+    try {
+      const adapter = navigator.gpu ? await navigator.gpu.requestAdapter() : null;
+      if (adapter) {
+        webgpu = true;
+        fallbackAdapter = !!((adapter.info && adapter.info.isFallbackAdapter) ?? adapter.isFallbackAdapter);
+      }
+    } catch {}
+
+    let accelerated = null;
+    let renderer = '';
+    try {
+      // Browsers refuse a context with this flag when WebGL would run in software.
+      const fast = document.createElement('canvas').getContext('webgl', { failIfMajorPerformanceCaveat: true });
+      const gl = fast || document.createElement('canvas').getContext('webgl');
+      if (gl) {
+        // Firefox reports the real renderer directly (and warns if the debug
+        // extension is used); Chromium and Safari mask it as "WebKit WebGL".
+        renderer = String(gl.getParameter(gl.RENDERER) || '');
+        if (/^webkit webgl$/i.test(renderer)) {
+          const info = gl.getExtension('WEBGL_debug_renderer_info');
+          if (info) renderer = String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL) || renderer);
+        }
+        const lose = gl.getExtension('WEBGL_lose_context');
+        if (lose) lose.loseContext();
+      }
+      accelerated = !!fast && !SOFTWARE_RENDERER.test(renderer);
+    } catch {}
+
+    const gpuUsable = webgpu && !fallbackAdapter;
+    if (fallbackAdapter) accelerated = false;
+    if (gpuUsable && accelerated === null) accelerated = true;
+    return { gpuUsable, accelerated, webgpu, renderer };
+  })();
+  return graphicsCheck;
+}
+
+// ---------------------------------------------------------------------------
 // Neural voices (Kokoro-82M running locally in a Web Worker)
 // ---------------------------------------------------------------------------
 
@@ -168,6 +224,9 @@ class SystemEngine {
 const KOKORO_WORKER_URL = new URL('kokoro-worker.js', (document.currentScript && document.currentScript.src) || location.href).href;
 // Generous: jobs run one at a time, so a request can wait behind prefetches on slow CPUs.
 const GENERATE_TIMEOUT_MS = 120000;
+// Give up on a load that goes silent (e.g. a GPU backend hanging) so load()
+// can fall back to the CPU model. Downloads report progress constantly.
+const LOAD_STALL_MS = 120000;
 
 const KOKORO_VOICES = [
   { id: 'af_heart', name: 'Heart', accent: 'US', gender: 'F', grade: 'A' },
@@ -232,11 +291,7 @@ class KokoroEngine {
   }
 
   async hasWebGPU() {
-    try {
-      return !!(navigator.gpu && await navigator.gpu.requestAdapter());
-    } catch {
-      return false;
-    }
+    return (await detectGraphics()).gpuUsable;
   }
 
   loadWith(device) {
@@ -261,9 +316,11 @@ class KokoroEngine {
     }
     this.worker = worker;
     let started = false;
+    let stallTimer = null;
 
     return new Promise((resolve, reject) => {
       const fail = (rawError) => {
+        clearTimeout(stallTimer);
         let error = rawError;
         if (/Content Security Policy/i.test(rawError) && /WebAssembly|unsafe-eval/i.test(rawError)) {
           console.warn(rawError);
@@ -274,12 +331,22 @@ class KokoroEngine {
         reject(new Error(error));
       };
 
+      const armStallTimer = () => {
+        clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+          if (this.worker === worker && this.state === 'loading') fail('loading stalled with no progress');
+        }, LOAD_STALL_MS);
+      };
+      armStallTimer();
+
       worker.onmessage = ({ data }) => {
         if (this.worker !== worker) return;
+        if (this.state === 'loading') armStallTimer();
         switch (data.type) {
           case 'started': started = true; break;
           case 'progress': this.onProgress(data.p); break;
           case 'ready':
+            clearTimeout(stallTimer);
             this.setState('ready', { device });
             resolve();
             break;

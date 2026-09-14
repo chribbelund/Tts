@@ -84,7 +84,8 @@ function splitIntoChunks(text, max = 180) {
     if (sentence.length > max) {
       push();
       let piece = '';
-      for (const word of sentence.split(/(?<=\s)/)) {
+      // (No regex lookbehind here: it's a syntax error before Safari 16.4.)
+      for (const word of sentence.match(/\S+\s*/g) || [sentence]) {
         if ((piece + word).length > max && piece) { chunks.push(piece); piece = ''; }
         piece += word;
       }

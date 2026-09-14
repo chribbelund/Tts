@@ -36,18 +36,21 @@ const DEFAULTS = {
   nicknames: {}, // twitch login -> spoken name
 };
 
+// JSON rather than structuredClone, which older Safari lacks.
+const cloneDefaults = () => JSON.parse(JSON.stringify(DEFAULTS));
+
 function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
     return {
-      ...structuredClone(DEFAULTS),
+      ...cloneDefaults(),
       ...saved,
       keys: { ...DEFAULTS.keys, ...(saved.keys || {}) },
       userVoices: { kokoro: {}, system: {}, ...(saved.userVoices || {}) },
       nicknames: { ...(saved.nicknames || {}) },
     };
   } catch {
-    return structuredClone(DEFAULTS);
+    return cloneDefaults();
   }
 }
 
@@ -545,6 +548,7 @@ function renderEngineUI() {
     : 'Built-in voices from your browser and OS. They start instantly and cover many languages. Edge has the most natural ones.';
   renderVoiceList();
   renderKokoroState(kokoroEngine.state, {});
+  renderGpuWarning();
 }
 
 function renderLanguageOptions() {
@@ -651,6 +655,67 @@ async function previewVoice(engine, voiceId, text) {
   if (wasReading && !reader.paused && reader.controller) reader.controller.resume();
 }
 
+// Where each browser keeps its hardware acceleration switch. Settings pages
+// can't be linked to from a web page, so the address is offered for copying.
+function graphicsSettingsHelp() {
+  const ua = navigator.userAgent;
+  const chromium = (url) => ({ steps: 'open Settings → System and turn on “Use graphics acceleration when available”', url });
+  if (/Firefox\//.test(ua)) {
+    return {
+      steps: 'open Settings → General → Performance, untick “Use recommended performance settings” and tick “Use hardware acceleration when available”',
+      url: 'about:preferences#general',
+    };
+  }
+  if (/Edg\//.test(ua)) return { steps: 'open Settings → System and performance and turn on “Use graphics acceleration when available”', url: 'edge://settings/system' };
+  if (/OPR\//.test(ua)) return { steps: 'open Settings → System and turn on “Use hardware acceleration when available”', url: 'opera://settings/system' };
+  if (navigator.brave) return chromium('brave://settings/system');
+  if (/Chrome\/|Chromium\//.test(ua)) return chromium('chrome://settings/system');
+  if (/Safari\//.test(ua)) {
+    // Safari has no acceleration switch; WebGPU is a feature flag.
+    return {
+      steps: 'turn on Settings → Advanced → “Show features for web developers” and check that Develop → Feature Flags → “WebGPU” is on',
+      url: '',
+      restart: false,
+    };
+  }
+  return { steps: 'turn on hardware (graphics) acceleration in your browser settings', url: '' };
+}
+
+async function renderGpuWarning() {
+  const box = $('#gpuWarning');
+  const wantsGpu = () => settings.engine === 'kokoro' && settings.kokoroMode !== 'wasm';
+  if (!wantsGpu()) { box.hidden = true; return; }
+
+  const gfx = await detectGraphics();
+  if (!wantsGpu() || gfx.gpuUsable) { box.hidden = true; return; }
+
+  const fallback = settings.kokoroMode === 'webgpu'
+    ? 'GPU mode can’t be used, so neural voices will fall back to the CPU'
+    : 'Neural voices will run on the CPU instead';
+
+  if (!window.isSecureContext) {
+    // Browsers hide WebGPU on insecure pages, which would look like missing support.
+    $('#gpuWarningTitle').textContent = 'GPU voices need HTTPS';
+    $('#gpuWarningText').textContent = 'This page isn’t loaded over HTTPS, so the browser won’t allow GPU or neural voices. Open it with https:// (or on localhost).';
+    $('#gpuWarningFix').hidden = true;
+    $('#gpuWarningCopy').hidden = true;
+  } else if (gfx.accelerated === false) {
+    const help = graphicsSettingsHelp();
+    $('#gpuWarningTitle').textContent = 'Graphics acceleration is turned off';
+    $('#gpuWarningText').textContent = `${fallback}. That is slower and can fall behind a busy chat.`;
+    $('#gpuWarningFix').textContent = `To fix it, ${help.steps}${help.restart === false ? '' : ', then restart the browser'}.`;
+    $('#gpuWarningFix').hidden = false;
+    $('#gpuSettingsUrl').textContent = help.url;
+    $('#gpuWarningCopy').hidden = !help.url;
+  } else {
+    $('#gpuWarningTitle').textContent = 'GPU voices aren’t available in this browser';
+    $('#gpuWarningText').textContent = `This browser doesn’t support WebGPU. ${fallback}, which is slower. Recent versions of Chrome, Edge and Safari can use the GPU.`;
+    $('#gpuWarningFix').hidden = true;
+    $('#gpuWarningCopy').hidden = true;
+  }
+  box.hidden = false;
+}
+
 function loadKokoro() {
   kokoroEngine.load(settings.kokoroMode);
 }
@@ -668,7 +733,7 @@ function renderKokoroState(state, info) {
     status.textContent = 'Not loaded. System voices are used until it is.';
   } else if (state === 'loading') {
     const mb = (n) => (n / 1e6).toFixed(0);
-    status.textContent = info.total
+    status.textContent = info.total >= 1e6
       ? `Loading on ${deviceName}… ${mb(info.loaded)} / ${mb(info.total)} MB`
       : `Loading on ${deviceName}…`;
     $('#kokoroProgress').style.width = `${((info.progress || 0) * 100).toFixed(1)}%`;
@@ -849,10 +914,16 @@ function enableMediaKeys(on) {
       mediaKeys.audio.loop = true;
     }
     mediaKeys.audio.play().catch(() => {});
-    session.setActionHandler('play', () => setPaused(false));
-    session.setActionHandler('pause', () => setPaused(true));
-    try { session.setActionHandler('stop', () => setPaused(true)); } catch {}
-    try { session.setActionHandler('nexttrack', () => skipCurrent()); } catch {}
+    const handlers = {
+      play: () => setPaused(false),
+      pause: () => setPaused(true),
+      stop: () => setPaused(true),
+      nexttrack: () => skipCurrent(),
+    };
+    // Browsers throw for actions they don't support.
+    for (const [action, handler] of Object.entries(handlers)) {
+      try { session.setActionHandler(action, handler); } catch {}
+    }
     updateMediaSession();
   } else {
     if (mediaKeys.audio) mediaKeys.audio.pause();
@@ -866,7 +937,7 @@ function enableMediaKeys(on) {
 
 function updateMediaSession() {
   if (!settings.mediaKeys || !('mediaSession' in navigator)) return;
-  navigator.mediaSession.metadata = new MediaMetadata({
+  if (typeof MediaMetadata === 'function') navigator.mediaSession.metadata = new MediaMetadata({
     title: reader.paused ? 'Chat reading paused' : 'Reading chat',
     artist: chat.channel ? `#${chat.channel}` : 'Chat Reader',
   });
@@ -950,6 +1021,7 @@ $('#kokoroMode').value = settings.kokoroMode;
 $('#kokoroMode').addEventListener('change', (e) => {
   settings.kokoroMode = e.target.value;
   saveSettings();
+  renderGpuWarning();
   if (kokoroEngine.state === 'ready' || kokoroEngine.state === 'error') {
     kokoroEngine.state = 'unloaded';
     kokoroEngine.terminate();
@@ -958,6 +1030,17 @@ $('#kokoroMode').addEventListener('change', (e) => {
   }
 });
 $('#kokoroLoadBtn').addEventListener('click', () => { userGesture(); loadKokoro(); });
+$('#gpuCopyBtn').addEventListener('click', async () => {
+  const button = $('#gpuCopyBtn');
+  try {
+    await navigator.clipboard.writeText($('#gpuSettingsUrl').textContent);
+    button.textContent = 'Copied';
+  } catch {
+    getSelection().selectAllChildren($('#gpuSettingsUrl'));
+    button.textContent = 'Press Ctrl+C';
+  }
+  setTimeout(() => { button.textContent = 'Copy'; }, 2000);
+});
 
 $('#systemLang').addEventListener('change', (e) => {
   settings.systemLang = e.target.value;
@@ -1055,11 +1138,24 @@ $('#gateBtn').addEventListener('click', () => {
 });
 
 if (systemEngine.supported) {
-  speechSynthesis.addEventListener('voiceschanged', () => {
+  let knownVoiceCount = -1;
+  const onVoicesChanged = () => {
+    const count = speechSynthesis.getVoices().length;
+    if (count === knownVoiceCount) return;
+    knownVoiceCount = count;
     renderLanguageOptions();
     renderVoiceList();
     refreshVoiceTags();
-  });
+  };
+  // Older Safari has no addEventListener on speechSynthesis and may never fire
+  // voiceschanged, so also poll briefly until the voices show up.
+  if (typeof speechSynthesis.addEventListener === 'function') speechSynthesis.addEventListener('voiceschanged', onVoicesChanged);
+  else speechSynthesis.onvoiceschanged = onVoicesChanged;
+  let polls = 0;
+  const voicePoll = setInterval(() => {
+    onVoicesChanged();
+    if (knownVoiceCount > 0 || ++polls > 20) clearInterval(voicePoll);
+  }, 250);
 }
 
 // ---------------------------------------------------------------------------

@@ -260,6 +260,35 @@ textarea { resize: vertical; }
 
 .load-row { display: flex; align-items: center; gap: 10px; }
 
+.warn {
+  /* Plain fallbacks first for browsers without color-mix() (Safari < 16.2, Firefox < 113). */
+  border: 1px solid var(--warn);
+  background: var(--panel-2);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn) 10%, var(--panel));
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.warn strong { color: var(--warn); font-weight: 650; }
+.warn p { margin: 0; }
+.warn-copy { display: flex; align-items: center; gap: 8px; }
+.warn-copy code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 4px 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
 .voice-list { list-style: none; margin: 0; padding: 4px; max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .voice-list li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; font-size: 13px; }
 .voice-list li:hover { background: var(--panel); }
@@ -289,5 +318,5 @@ textarea { resize: vertical; }
 .keycap.capturing { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- click gate ---------- */
-.gate { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(4px); display: grid; place-items: center; z-index: 10; }
+.gate { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); background: color-mix(in srgb, var(--bg) 80%, transparent); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); display: grid; place-items: center; z-index: 10; }
 .gate .btn { font-size: 16px; padding: 14px 24px; }

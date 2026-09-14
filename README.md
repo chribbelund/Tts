@@ -25,6 +25,19 @@ The server's Content-Security-Policy must allow three things:
 
 Coolify and Railway build static sites with Railpack. Railpack's default Caddy config sends a CSP that blocks all three, which shows up as "Couldn't load … Using system voices". The `Caddyfile` in this folder replaces that default: Railpack picks it up automatically from the project root. On other hosts, copy the `Content-Security-Policy` value from it.
 
+## Browser support
+
+| Browser | System voices | Neural voices | Tested |
+|---|---|---|---|
+| Chrome, Edge, Brave, Opera (recent) | ✓ | GPU (WebGPU) or CPU | Chrome, in automated tests |
+| Safari 16+ | ✓ | CPU. GPU on Safari 26+, with automatic fallback to CPU if it fails | Code review only |
+| Firefox 115+ | ✓ | CPU. GPU where Firefox supports WebGPU | Code review only |
+
+Notes:
+- Voice quality depends on the browser. Edge's "Natural" voices are the best free option. Firefox on Linux needs `speech-dispatcher` installed for system voices.
+- The ⏯ media-key option works most reliably in Chrome and Edge.
+- If a shortcut clashes with your browser, rebind it in the Keys section. Some browsers use Alt+letter shortcuts for their own menus on Windows.
+
 ## Features
 
 - **Any channel:** type a name or paste a `twitch.tv/...` link. It reconnects automatically if the connection drops.
@@ -52,11 +65,14 @@ Coolify and Railway build static sites with Railpack. Railpack's default Caddy c
 
 The neural engine runs [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) locally via [kokoro-js](https://www.npmjs.com/package/kokoro-js). Nothing is sent to a TTS service. Upcoming messages are synthesized ahead of time so playback keeps up. System voices are used while it loads.
 
+GPU mode needs graphics (hardware) acceleration. If it's turned off, or the browser has no WebGPU, the app shows a warning with steps for your browser and uses the CPU model instead.
+
 For system voices, Microsoft Edge offers the most natural free options, the "… Online (Natural)" voices. On macOS you can download higher-quality "Enhanced" or "Premium" voices under System Settings → Accessibility → Spoken Content.
 
 ## Files
 
 - `index.html`, `style.css`: UI
+- `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`: tab and bookmark icons
 - `js/irc.js`: anonymous Twitch chat connection (IRC over WebSocket)
 - `js/speech-text.js`: turns chat messages into natural spoken sentences
 - `js/engines.js`: the neural and system speech engines, both supporting pause and resume

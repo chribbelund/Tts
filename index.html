@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chat Reader · Twitch TTS</title>
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -80,6 +83,15 @@
           <option value="webgpu">GPU · fastest · 326 MB</option>
           <option value="wasm">CPU · 92 MB</option>
         </select>
+        <div id="gpuWarning" class="warn" role="status" hidden>
+          <strong id="gpuWarningTitle"></strong>
+          <p id="gpuWarningText"></p>
+          <p id="gpuWarningFix"></p>
+          <div id="gpuWarningCopy" class="warn-copy" hidden>
+            <code id="gpuSettingsUrl"></code>
+            <button type="button" class="btn small" id="gpuCopyBtn">Copy</button>
+          </div>
+        </div>
         <div class="load-row">
           <button id="kokoroLoadBtn" class="btn small">Load neural voices</button>
           <span id="kokoroStatus" class="hint"></span>
