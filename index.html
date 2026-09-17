@@ -131,6 +131,16 @@
       <label class="check"><input type="checkbox" id="quoteParent"> For replies, also read the message being replied to</label>
       <label class="check"><input type="checkbox" id="readEvents"> Read subs, raids and announcements</label>
       <label class="check"><input type="checkbox" id="readEmojis"> Read emojis</label>
+      <div class="field">
+        <label class="row-label" for="emoteMode">Emotes</label>
+        <select id="emoteMode">
+          <option value="skip-all">Skip emotes, third-party ones too</option>
+          <option value="skip-twitch">Skip Twitch emotes only</option>
+          <option value="read">Read emote names out loud</option>
+        </select>
+        <label class="check" id="readEmoteOnlyRow"><input type="checkbox" id="readEmoteOnly"> Still read a message that is nothing but emotes</label>
+        <p class="hint" id="emoteHint"></p>
+      </div>
       <div class="field inline">
         <label for="maxLength">Cut messages after</label>
         <input type="number" id="maxLength" min="20" max="500" step="10"> <span class="hint">characters</span>
@@ -179,6 +189,7 @@
 </div>
 
 <script src="js/irc.js"></script>
+<script src="js/emotes.js"></script>
 <script src="js/speech-text.js"></script>
 <script src="js/engines.js"></script>
 <script src="js/app.js"></script>

@@ -52,7 +52,9 @@ Notes:
 - **Nicknames:** map a Twitch username to the name you want spoken. It applies to their messages, to replies to them, to @mentions and to their sub/raid events. Click a name in chat to add one quickly.
 - **Moderation aware:** messages deleted by mods, and messages from banned or timed-out users, are removed from the queue.
 - **Filters:** skip `!commands`, links and specific chatters. You can also cap message length and skip old messages when chat is too fast.
-- **Cleanup:** emotes and emojis are stripped, links become "link", and spam like `loooooool` or repeated words is shortened.
+- **Cleanup:** emojis are stripped, links become "link", and spam like `loooooool` or repeated words is shortened.
+- **Emotes:** Twitch marks its own emotes in the message, but 7TV, BetterTTV and FrankerFaceZ ones arrive as ordinary words, so the channel's emote names are fetched from those three services when you connect. Under *Reading → Emotes* you can skip everything (the default), skip only Twitch's own emotes and make no third-party requests, or have emote names read out loud. A message that is nothing but emotes is skipped instead of read.
+  - Channel emote sets contain names that are also everyday words (`Chat`, `Stare`, `Timer`). Those are never taken out of a sentence: a name that could be a word someone typed is only dropped when the whole message is emotes.
 
 ## Voice engines
 
@@ -74,6 +76,7 @@ For system voices, Microsoft Edge offers the most natural free options, the "…
 - `index.html`, `style.css`: UI
 - `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`: tab and bookmark icons
 - `js/irc.js`: anonymous Twitch chat connection (IRC over WebSocket)
+- `js/emotes.js`: 7TV, BetterTTV and FrankerFaceZ emote names for the connected channel
 - `js/speech-text.js`: turns chat messages into natural spoken sentences
 - `js/engines.js`: the neural and system speech engines, both supporting pause and resume
 - `js/kokoro-worker.js`: runs the neural voice model in the background

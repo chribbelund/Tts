@@ -52,7 +52,8 @@ function parseIrcLine(line) {
 class TwitchChat {
   /**
    * handlers: onStatus(state, text), onMessage(msg), onUserNotice(msg),
-   *           onClearChat(targetUserId|null), onDeleteMessage(messageId)
+   *           onClearChat(targetUserId|null), onDeleteMessage(messageId),
+   *           onRoomState(roomId)
    */
   constructor(handlers) {
     this.h = handlers;
@@ -171,6 +172,10 @@ class TwitchChat {
           this.h.onStatus('error', `#${this.channel} doesn't exist or is suspended`);
           this.ws && this.ws.close();
         }
+        break;
+      // Sent right after JOIN: the earliest we learn the channel's numeric id.
+      case 'ROOMSTATE':
+        if (msg.tags['room-id']) this.h.onRoomState(msg.tags['room-id']);
         break;
       case 'PRIVMSG':
         this.h.onMessage(msg);

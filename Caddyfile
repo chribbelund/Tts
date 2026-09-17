@@ -3,7 +3,8 @@
 #   'wasm-unsafe-eval'   the voice model runs on WebAssembly
 #   worker-src blob:     the voice worker and ONNX runtime helpers
 #   media-src blob:      voice previews and the media-key audio loop
-#   connect-src wss:     Twitch chat, plus https: for the model download
+#   connect-src wss:     Twitch chat, plus https: for the model download and
+#                        the 7TV/BetterTTV/FrankerFaceZ emote name lookups
 
 {
 	admin off

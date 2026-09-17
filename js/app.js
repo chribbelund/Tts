@@ -22,6 +22,8 @@ const DEFAULTS = {
   quoteParent: false,
   readEvents: true,
   readEmojis: false,
+  emoteMode: 'skip-all', // skip-all | skip-twitch | read
+  readEmoteOnly: true,   // a message with nothing but emotes: read their names
   maxLength: 300,
   catchUp: 0,
   skipCommands: true,
@@ -304,6 +306,77 @@ function restartCurrent() {
 // Twitch → entries
 // ---------------------------------------------------------------------------
 
+// Emote names in the 7TV/BTTV/FFZ sets, loaded once we know the channel id.
+const thirdPartyEmotes = new ThirdPartyEmotes(() => {
+  renderEmoteStatus();
+  // Messages that queued up while the sets were still downloading.
+  refreshSpeechBodies();
+  renderNow();
+});
+
+let currentRoomId = null;
+
+function loadThirdPartyEmotes(roomId) {
+  if (roomId && roomId !== currentRoomId) {
+    currentRoomId = roomId;
+    thirdPartyEmotes.clear();
+  }
+  if (settings.emoteMode === 'skip-all' && currentRoomId) thirdPartyEmotes.load(currentRoomId);
+  renderEmoteStatus();
+}
+
+function renderEmoteStatus() {
+  const hint = $('#emoteHint');
+  // In "read" mode every emote is spoken anyway, so the option is moot.
+  $('#readEmoteOnlyRow').hidden = settings.emoteMode === 'read';
+  if (settings.emoteMode === 'read') {
+    hint.textContent = 'Emote names are spoken as written, e.g. “Kappa”.';
+  } else if (settings.emoteMode === 'skip-twitch') {
+    hint.textContent = '7TV, BetterTTV and FrankerFaceZ emotes are still read out, because Twitch doesn’t mark them in the message.';
+  } else if (!currentRoomId) {
+    hint.textContent = 'The channel’s 7TV, BetterTTV and FrankerFaceZ emote names are fetched when you connect.';
+  } else if (!thirdPartyEmotes.loaded) {
+    hint.textContent = 'Fetching 7TV, BetterTTV and FrankerFaceZ emote names…';
+  } else if (!thirdPartyEmotes.size) {
+    hint.textContent = 'Couldn’t reach 7TV, BetterTTV or FrankerFaceZ, so only Twitch’s own emotes are skipped.';
+  } else {
+    const count = thirdPartyEmotes.size.toLocaleString();
+    hint.textContent = `Also skipping ${count} 7TV/BTTV/FFZ emote names${thirdPartyEmotes.failed ? ', though one source didn’t answer' : ''}.`;
+  }
+}
+
+/**
+ * The words actually handed to the voice. Twitch's own emotes come with
+ * positions in the `emotes` tag; third-party ones arrive as plain words, so
+ * they can only be recognised by name. `reply` is the chatter being replied
+ * to, whose @mention Twitch puts in front of the message.
+ */
+function speechBodyFor(rawText, emotesTag, reply) {
+  const withoutMention = (t) => (reply ? stripLeadingMention(t, reply.login, reply.displayName) : t);
+  if (settings.emoteMode === 'read') return withoutMention(rawText);
+
+  let body = removeEmotes(rawText, emotesTag);
+  if (settings.emoteMode === 'skip-all') body = thirdPartyEmotes.strip(body);
+  body = withoutMention(body);
+
+  // Taking the emotes out left nothing to say, so the message was only emotes.
+  // Read their names instead of staying silent, if that's what the user wants.
+  if (settings.readEmoteOnly && !cleanForSpeech(body, { readEmojis: settings.readEmojis })) {
+    return withoutMention(rawText);
+  }
+  return body;
+}
+
+// Re-derive what the voice will say for messages that haven't been read yet,
+// after the emote settings change or the emote sets finish loading.
+function refreshSpeechBodies() {
+  for (const entry of [...reader.queue, reader.current]) {
+    if (!entry || entry.rawText === undefined) continue;
+    const reply = entry.isReply ? { login: entry.parentLogin, displayName: entry.parentDisplayName } : null;
+    entry.speechBody = speechBodyFor(entry.rawText, entry.emotesTag, reply);
+  }
+}
+
 function entryFromPrivmsg(msg) {
   const tags = msg.tags;
   let text = msg.params[1] || '';
@@ -314,8 +387,8 @@ function entryFromPrivmsg(msg) {
   const login = (tags.login || msg.prefix.split('!')[0] || '').toLowerCase();
   const isReply = !!tags['reply-parent-msg-id'];
 
-  let speechBody = removeEmotes(text, tags.emotes);
-  if (isReply) speechBody = stripLeadingMention(speechBody, tags['reply-parent-user-login'], tags['reply-parent-display-name']);
+  const reply = isReply ? { login: tags['reply-parent-user-login'], displayName: tags['reply-parent-display-name'] } : null;
+  const speechBody = speechBodyFor(text, tags.emotes, reply);
 
   let displayText = text;
   if (isReply) displayText = stripLeadingMention(text, tags['reply-parent-user-login'], tags['reply-parent-display-name']);
@@ -328,6 +401,7 @@ function entryFromPrivmsg(msg) {
     displayName: tags['display-name'] || login,
     color: tags.color || null,
     rawText: text,
+    emotesTag: tags.emotes,
     displayText,
     speechBody,
     action,
@@ -349,8 +423,9 @@ function entryFromUserNotice(msg) {
     displayName: tags['display-name'] || login,
     color: tags.color || null,
     rawText: text,
+    emotesTag: tags.emotes,
     displayText: text,
-    speechBody: removeEmotes(text, tags.emotes),
+    speechBody: speechBodyFor(text, tags.emotes),
   };
   if (tags['msg-id'] === 'announcement') return { ...base, kind: 'announcement' };
   return { ...base, kind: 'event', systemText: tags['system-msg'] || '' };
@@ -360,6 +435,7 @@ const chat = new TwitchChat({
   onStatus: renderConnection,
   onMessage: (msg) => enqueue(entryFromPrivmsg(msg)),
   onUserNotice: (msg) => enqueue(entryFromUserNotice(msg)),
+  onRoomState: (roomId) => loadThirdPartyEmotes(roomId),
   onClearChat: (userId) => {
     const targets = [...reader.queue, reader.current].filter((e) => e && (!userId || e.userId === userId));
     for (const entry of targets) removeFromQueue(entry, 'deleted', userId ? 'removed by mod' : 'chat cleared');
@@ -1077,6 +1153,24 @@ for (const key of checkboxSettings) {
 
 $('#nameFormat').value = settings.nameFormat;
 $('#nameFormat').addEventListener('change', (e) => { settings.nameFormat = e.target.value; saveSettings(); });
+
+$('#emoteMode').value = settings.emoteMode;
+$('#emoteMode').addEventListener('change', (e) => {
+  settings.emoteMode = e.target.value;
+  saveSettings();
+  loadThirdPartyEmotes();     // starts the fetch if this mode needs it
+  refreshSpeechBodies();
+  renderNow();
+});
+
+$('#readEmoteOnly').checked = settings.readEmoteOnly;
+$('#readEmoteOnly').addEventListener('change', (e) => {
+  settings.readEmoteOnly = e.target.checked;
+  saveSettings();
+  refreshSpeechBodies();
+  renderNow();
+});
+renderEmoteStatus();
 
 for (const key of ['maxLength', 'catchUp']) {
   const input = $(`#${key}`);
