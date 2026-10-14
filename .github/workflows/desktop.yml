@@ -44,7 +44,7 @@ jobs:
 
       - name: Check the page and the shell parse
         working-directory: desktop
-        run: node --check main.js && node --check preload.js && node --check accelerator.js && node --check ../js/app.js
+        run: node --check main.js && node --check preload.js && node --check accelerator.js && node --check sources/youtube.js && node --check sources/tiktok.js && node --check ../js/app.js && node --check ../js/sources.js
 
       - name: Copy the page into the app
         working-directory: desktop
@@ -87,7 +87,7 @@ jobs:
           draft: false
           generate_release_notes: true
           body: |
-            Desktop builds of Chat Reader, with hotkeys that keep working while a game is focused.
+            Desktop builds of Chat Reader: reads Twitch, YouTube and TikTok chat out loud, with hotkeys that keep working while a game is focused.
 
             | Platform | Download |
             |---|---|
