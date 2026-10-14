@@ -1,0 +1,67 @@
+appId: com.github.chribbelund.chatreader
+productName: Chat Reader
+copyright: Copyright © Christoffer Lundqvist
+
+directories:
+  buildResources: build
+  output: dist
+
+# Only the shell and the copied page; node_modules holds build tools alone.
+files:
+  - main.js
+  - preload.js
+  - accelerator.js
+  - package.json
+  - web/**/*
+
+asar: true
+npmRebuild: false
+artifactName: chat-reader-${version}-${os}-${arch}.${ext}
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.entertainment
+  darkModeSupport: true
+  # Unsigned builds: see the README for the first-run steps on each OS.
+  identity: null
+  target:
+    - target: dmg
+      arch: [universal]
+    - target: zip
+      arch: [universal]
+
+dmg:
+  title: Chat Reader ${version}
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Chat Reader
+
+portable:
+  artifactName: chat-reader-${version}-windows-portable.${ext}
+
+linux:
+  icon: build/icon.png
+  category: AudioVideo
+  synopsis: Reads a Twitch channel's chat out loud
+  description: >-
+    Reads a Twitch channel's chat out loud with neural or system voices, and
+    with hotkeys that keep working while a game is focused.
+  desktop:
+    entry:
+      StartupWMClass: chat-reader
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]

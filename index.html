@@ -173,13 +173,44 @@
       <div class="field keybind">
         <span>Pause / resume</span>
         <button type="button" class="btn small keycap" data-bind="pause"></button>
+        <small class="hotkey-note" hidden></small>
       </div>
       <div class="field keybind">
         <span>Skip message</span>
         <button type="button" class="btn small keycap" data-bind="skip"></button>
+        <small class="hotkey-note" hidden></small>
       </div>
-      <label class="check"><input type="checkbox" id="mediaKeys"> Use the keyboard’s ⏯ media key too, which works while other apps are focused</label>
-      <p class="hint">Normal shortcuts work while this tab is focused. The media key also works while you’re in a game.</p>
+      <div class="field keybind">
+        <span>Volume up</span>
+        <button type="button" class="btn small keycap" data-bind="volumeUp"></button>
+        <small class="hotkey-note" hidden></small>
+      </div>
+      <div class="field keybind">
+        <span>Volume down</span>
+        <button type="button" class="btn small keycap" data-bind="volumeDown"></button>
+        <small class="hotkey-note" hidden></small>
+      </div>
+      <div class="field keybind">
+        <span>Clear waiting messages</span>
+        <button type="button" class="btn small keycap" data-bind="clear"></button>
+        <small class="hotkey-note" hidden></small>
+      </div>
+      <div class="field keybind desktop-only">
+        <span>Show / hide the window</span>
+        <button type="button" class="btn small keycap" data-bind="toggleWindow"></button>
+        <small class="hotkey-note" hidden></small>
+      </div>
+      <p class="hint">Click a shortcut and press the keys you want. Backspace clears it, Esc keeps the old one.</p>
+
+      <label class="check desktop-only"><input type="checkbox" id="globalHotkeys"> Let these work while another app is focused</label>
+      <label class="check"><input type="checkbox" id="mediaKeys"> Use the keyboard’s ⏯ media key too, for pause and skip</label>
+      <p class="hint browser-only">Normal shortcuts work while this tab is focused. The media key also works while you’re in a game.</p>
+      <p class="hint desktop-only" id="hotkeyStatus"></p>
+      <p class="hint desktop-only" id="accessibilityNote" hidden>
+        macOS only hands the ⏯ key to apps allowed under Privacy &amp; Security → Accessibility.
+        <button type="button" class="btn small" id="accessibilityBtn">Ask for access</button>
+      </p>
+      <p class="hint desktop-only" id="desktopVersion"></p>
     </section>
   </aside>
 </main>

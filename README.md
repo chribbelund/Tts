@@ -16,6 +16,78 @@ Add `?channel=name` to the URL to prefill a channel, e.g. `http://localhost:8765
 
 Chrome or Edge is recommended. Neural voices need HTTPS, or `localhost`.
 
+## Desktop app
+
+The desktop app is this same page in a small Electron shell, with the one thing a
+browser can't do: the shortcuts are registered with the operating system, so they
+work while a game, Discord or anything else is focused.
+
+Download the build for your system from the
+[releases page](https://github.com/chribbelund/Tts/releases).
+
+| System | File |
+|---|---|
+| macOS (Intel and Apple silicon) | `chat-reader-<version>-mac-universal.dmg`, or the `.zip` |
+| Windows | `...-setup.exe`, or `...-portable.exe` to run it without installing |
+| Linux | `.AppImage` (`chmod +x` it and run it), or the `.deb` |
+
+The builds aren't code-signed, so the first launch needs one extra step: on macOS
+right-click the app and choose *Open*, on Windows choose *More info* → *Run anyway*.
+
+### Keys
+
+Every action can be rebound: click a shortcut in the Keys section and press the keys
+you want. Backspace clears one, Esc keeps the old one.
+
+| Action | Default |
+|---|---|
+| Pause / resume | `Alt+P` (`⌥P`) |
+| Skip message | `Alt+S` (`⌥S`) |
+| Volume up / down, in steps of 5 | `Alt+↑` / `Alt+↓` |
+| Clear waiting messages | `Alt+Shift+C` |
+| Show / hide the window | `Alt+Shift+H` |
+
+- An ordinary key needs at least one modifier, because a global shortcut takes that
+  key away from every other app. Function keys (F1–F24) can stand on their own.
+- If another app already holds a combination, the row says so and nothing is bound to
+  it — pick different keys.
+- Turning off *Let these work while another app is focused* makes the shortcuts behave
+  like the web version: only inside the window.
+- *Use the keyboard's ⏯ media key* adds ⏯ and ⏭ on top of your own shortcuts. macOS
+  only sends media keys to apps allowed under System Settings → Privacy & Security →
+  Accessibility, and the app offers a button that asks for it.
+
+Closing the window leaves the reader running: the app sits in the tray (menu bar on
+macOS), which has pause, skip, clear and quit. Reading also keeps its normal speed
+while the window is hidden or behind a game.
+
+### Building it yourself
+
+```bash
+cd desktop
+npm install
+npm start      # run it from the checkout
+npm run dist   # build for the system you're on, into desktop/dist/
+```
+
+`npm start` copies the page into `desktop/web/` for packaging but then loads the files
+in the project root, so ⌘R / Ctrl+R picks up your edits. `npm run icons` re-renders
+`desktop/build/icon.png` from `favicon.svg` if you change the icon.
+
+### Releasing
+
+`.github/workflows/desktop.yml` builds macOS, Windows and Linux and attaches the
+binaries to a GitHub release when a tag starting with `v` is pushed. Set the version
+in `desktop/package.json` first — the file names come from it:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The same workflow builds (without publishing) on pull requests that touch the app, and
+can be started by hand from the Actions tab.
+
 ## Deploying (Coolify, Railway, any static host)
 
 The server's Content-Security-Policy must allow three things:
@@ -35,7 +107,7 @@ Coolify and Railway build static sites with Railpack. Railpack's default Caddy c
 
 Notes:
 - Voice quality depends on the browser. Edge's "Natural" voices are the best free option. Firefox on Linux needs `speech-dispatcher` installed for system voices.
-- The ⏯ media-key option works most reliably in Chrome and Edge.
+- The ⏯ media-key option works most reliably in Chrome and Edge. The desktop app registers it with the OS instead, so it doesn't depend on the browser.
 - If a shortcut clashes with your browser, rebind it in the Keys section. Some browsers use Alt+letter shortcuts for their own menus on Windows.
 
 ## Features
@@ -46,7 +118,7 @@ Notes:
   - Neural voices resume at the exact point.
   - System voices resume from the last word spoken, or from the start of the sentence if the voice doesn't report word positions.
 - **Skip:** Alt+S. You can remove waiting messages with ×. Both shortcuts can be rebound in the Keys section.
-- **Media key:** turn on *Use the keyboard's ⏯ media key* to pause and resume while a game or another app is focused. Normal shortcuts only work while the tab is focused, which is a browser limitation.
+- **Media key:** turn on *Use the keyboard's ⏯ media key* to pause and resume while a game or another app is focused. Normal shortcuts only work while the tab is focused, which is a browser limitation — the [desktop app](#desktop-app) has no such limit and makes every shortcut work from any app.
 - **Volume and speed:** with neural voices, volume changes apply instantly.
 - **Multiple voices:** each chatter gets a consistent voice from the pool, with a slight per-chatter pitch and pace variation. Click the voice tag on a message to give that chatter a different voice.
 - **Nicknames:** map a Twitch username to the name you want spoken. It applies to their messages, to replies to them, to @mentions and to their sub/raid events. Click a name in chat to add one quickly.
@@ -83,3 +155,5 @@ For system voices, Microsoft Edge offers the most natural free options, the "…
 - `js/kokoro-worker.js`: runs the neural voice model in the background
 - `Caddyfile`: server config with a CSP that allows the neural voices
 - `js/app.js`: queue, pause logic, settings, keybindings
+- `desktop/`: the Electron shell — window, tray, global hotkeys (`main.js`, `accelerator.js`, `preload.js`) and the packaging config
+- `.github/workflows/desktop.yml`: builds the desktop binaries and publishes them on a `v*` tag

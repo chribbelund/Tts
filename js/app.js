@@ -32,8 +32,13 @@ const DEFAULTS = {
   keys: {
     pause: { code: 'KeyP', alt: true, ctrl: false, shift: false, meta: false },
     skip: { code: 'KeyS', alt: true, ctrl: false, shift: false, meta: false },
+    volumeUp: { code: 'ArrowUp', alt: true, ctrl: false, shift: false, meta: false },
+    volumeDown: { code: 'ArrowDown', alt: true, ctrl: false, shift: false, meta: false },
+    clear: { code: 'KeyC', alt: true, ctrl: false, shift: true, meta: false },
+    toggleWindow: { code: 'KeyH', alt: true, ctrl: false, shift: true, meta: false },
   },
   mediaKeys: false,
+  globalHotkeys: true, // desktop app only: let the OS deliver the keys from any app
   userVoices: { kokoro: {}, system: {} },
   nicknames: {}, // twitch login -> spoken name
 };
@@ -64,6 +69,13 @@ function saveSettings() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch {}
   }, 200);
 }
+
+// The Electron shell in desktop/ exposes this from its preload script. In a
+// browser it stays null and every desktop-only path below is skipped.
+const desktop = window.chatReaderDesktop || null;
+
+// What the OS currently holds for us, filled in by syncGlobalHotkeys().
+const globalHotkeys = { registered: {}, problems: {}, mediaAccess: true };
 
 // ---------------------------------------------------------------------------
 // DOM helpers
@@ -248,8 +260,35 @@ function prefetchUpcoming(after) {
   kokoroEngine.prefetch(items);
 }
 
+// Everything a key can be bound to. The desktop app sends the same names back
+// when the OS delivers a shortcut from another window.
+const ACTIONS = {
+  pause: () => { userGesture(); togglePause(); },
+  skip: () => skipCurrent(),
+  volumeUp: () => setVolume(settings.volume + 5),
+  volumeDown: () => setVolume(settings.volume - 5),
+  clear: () => clearQueue(),
+  toggleWindow: () => desktop && desktop.toggleWindow(),
+};
+
+function runAction(action) {
+  if (ACTIONS[action]) ACTIONS[action]();
+}
+
 function togglePause() {
   setPaused(!reader.paused);
+}
+
+function setVolume(value, { live = false } = {}) {
+  const next = Math.max(0, Math.min(100, Math.round(value)));
+  settings.volume = next;
+  $('#volume').value = next;
+  $('#volumeOut').textContent = `${next}%`;
+  // Neural playback follows the volume while the slider moves; a system-voice
+  // utterance has to be restarted for it, so that waits until the slider is
+  // let go (or until a hotkey changes the volume in one step).
+  if (reader.controller && (!live || reader.current.engine === kokoroEngine)) reader.controller.volumeChanged();
+  saveSettings();
 }
 
 function setPaused(paused) {
@@ -588,6 +627,8 @@ function renderNow() {
   if (!entry) nowBar.style.width = '0';
 
   for (const e of feedEntries) e.node.classList.toggle('paused', e.status === 'speaking' && reader.paused);
+
+  if (desktop) desktop.setState({ paused: reader.paused, channel: chat.channel || '', waiting });
 }
 
 function tickProgress() {
@@ -948,9 +989,14 @@ window.addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.code === 'Escape') return stopCapture();
     if (MODIFIER_CODES.test(e.code)) return;
-    settings.keys[capturing.dataset.bind] = { code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
+    const action = capturing.dataset.bind;
+    // Backspace and Delete clear a shortcut rather than becoming one.
+    settings.keys[action] = (e.code === 'Backspace' || e.code === 'Delete')
+      ? null
+      : { code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
     saveSettings();
     stopCapture();
+    syncGlobalHotkeys();
     renderNow();
     return;
   }
@@ -962,9 +1008,11 @@ window.addEventListener('keydown', (e) => {
   for (const [action, binding] of Object.entries(settings.keys)) {
     if (!matches(binding)) continue;
     if (typing && !(binding.ctrl || binding.alt || binding.meta)) return;
+    // In the desktop app the OS already delivered this one, from whichever
+    // window had focus; acting on it here too would run it twice.
+    if (globalHotkeys.registered[action]) return;
     e.preventDefault();
-    if (action === 'pause') togglePause();
-    if (action === 'skip') skipCurrent();
+    runAction(action);
     return;
   }
 }, true);
@@ -982,6 +1030,9 @@ function makeQuietLoop() {
 }
 
 function enableMediaKeys(on) {
+  // The desktop app takes the ⏯ key from the OS, together with the other
+  // global hotkeys, so none of the trickery below is needed there.
+  if (desktop) return syncGlobalHotkeys();
   if (!('mediaSession' in navigator)) return;
   const session = navigator.mediaSession;
   if (on) {
@@ -1021,6 +1072,69 @@ function updateMediaSession() {
 }
 
 // ---------------------------------------------------------------------------
+// Desktop app: hotkeys the OS delivers from whichever window has focus
+// ---------------------------------------------------------------------------
+
+function syncGlobalHotkeys() {
+  if (!desktop) return;
+  desktop.applyHotkeys({
+    enabled: settings.globalHotkeys,
+    bindings: settings.keys,
+    media: settings.mediaKeys,
+  }).then((result) => {
+    globalHotkeys.registered = result.registered || {};
+    globalHotkeys.problems = result.problems || {};
+    globalHotkeys.mediaAccess = result.mediaAccess !== false;
+    renderHotkeyState();
+  }).catch(() => {});
+}
+
+function renderHotkeyState() {
+  if (!desktop) return;
+
+  for (const button of $$('[data-bind]')) {
+    const problem = settings.globalHotkeys ? globalHotkeys.problems[button.dataset.bind] : null;
+    const note = button.closest('.keybind').querySelector('.hotkey-note');
+    note.textContent = problem || '';
+    note.hidden = !problem;
+    button.classList.toggle('conflict', !!problem);
+  }
+
+  const MEDIA_LABELS = { 'media:pause': '⏯', 'media:skip': '⏭' };
+  const taken = Object.keys(globalHotkeys.registered)
+    .map((action) => MEDIA_LABELS[action] || keyLabel(settings.keys[action]))
+    .filter((label, i, all) => all.indexOf(label) === i);
+
+  $('#hotkeyStatus').textContent = !settings.globalHotkeys
+    ? `Shortcuts only work while this window is focused.${taken.length ? ` ${taken.join(' and ')} still work everywhere.` : ''}`
+    : !taken.length
+      ? 'Nothing is bound, so no keys are taken from other apps.'
+      : `Working in every app: ${taken.join(', ')}.`;
+
+  $('#accessibilityNote').hidden = !(settings.mediaKeys && !globalHotkeys.mediaAccess);
+}
+
+function startDesktop() {
+  if (!desktop) return;
+  document.body.classList.add('is-desktop');
+  if (desktop.version) $('#desktopVersion').textContent = `Desktop app ${desktop.version}`;
+
+  desktop.onAction(runAction);
+
+  $('#globalHotkeys').checked = settings.globalHotkeys;
+  $('#globalHotkeys').addEventListener('change', (e) => {
+    settings.globalHotkeys = e.target.checked;
+    saveSettings();
+    syncGlobalHotkeys();
+  });
+  $('#accessibilityBtn').addEventListener('click', () => {
+    desktop.requestAccessibility().then(syncGlobalHotkeys);
+  });
+
+  syncGlobalHotkeys();
+}
+
+// ---------------------------------------------------------------------------
 // Wiring up controls
 // ---------------------------------------------------------------------------
 
@@ -1028,7 +1142,7 @@ function userGesture() {
   // Audio playback needs a user gesture in most browsers; use it to prime both.
   kokoroEngine.ensureAudio();
   if (kokoroEngine.ctx.state === 'suspended' && !reader.paused) kokoroEngine.ctx.resume();
-  if (settings.mediaKeys) enableMediaKeys(true);
+  if (settings.mediaKeys && !desktop) enableMediaKeys(true);
   if (settings.engine === 'kokoro' && kokoroEngine.state === 'unloaded') loadKokoro();
 }
 
@@ -1063,12 +1177,7 @@ $('#clearBtn').addEventListener('click', clearQueue);
 
 $('#volume').value = settings.volume;
 $('#volumeOut').textContent = `${settings.volume}%`;
-$('#volume').addEventListener('input', (e) => {
-  settings.volume = Number(e.target.value);
-  $('#volumeOut').textContent = `${settings.volume}%`;
-  if (reader.controller && reader.current.engine === kokoroEngine) reader.controller.volumeChanged();
-  saveSettings();
-});
+$('#volume').addEventListener('input', (e) => setVolume(Number(e.target.value), { live: true }));
 $('#volume').addEventListener('change', () => {
   if (reader.controller && reader.current.engine === systemEngine) reader.controller.volumeChanged();
 });
@@ -1256,6 +1365,7 @@ if (systemEngine.supported) {
 // Start
 // ---------------------------------------------------------------------------
 
+startDesktop();
 renderLanguageOptions();
 renderEngineUI();
 renderKeyLabels();

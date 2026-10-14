@@ -1,0 +1,26 @@
+{
+  "name": "chat-reader-desktop",
+  "productName": "Chat Reader",
+  "version": "1.0.0",
+  "description": "Reads a Twitch channel's chat out loud, with hotkeys that work while you're in a game.",
+  "homepage": "https://github.com/chribbelund/Tts",
+  "author": {
+    "name": "Christoffer Lundqvist"
+  },
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "sync-web": "node scripts/sync-web.js",
+    "start": "npm run sync-web && electron .",
+    "icons": "electron scripts/make-icons.js",
+    "pack": "npm run sync-web && electron-builder --dir",
+    "dist": "npm run sync-web && electron-builder",
+    "dist:mac": "npm run sync-web && electron-builder --mac",
+    "dist:win": "npm run sync-web && electron-builder --win",
+    "dist:linux": "npm run sync-web && electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3"
+  }
+}
