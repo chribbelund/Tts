@@ -29,7 +29,7 @@ let win = null;
 let tray = null;
 let quitting = false;
 let toldAboutTray = false;
-let readerState = { paused: false, channel: '', waiting: 0 };
+let readerState = { paused: false, channel: '', waiting: 0, replay: true };
 
 // ---------------------------------------------------------------------------
 // Window
@@ -159,16 +159,17 @@ function sendAction(action) {
 // Global hotkeys
 // ---------------------------------------------------------------------------
 
-// The hardware media keys, offered as a second way to reach the two actions
-// that are worth reaching mid-game.
+// The hardware media keys, offered as a second way to reach the actions that
+// are worth reaching mid-game.
 const MEDIA_BINDINGS = {
   'media:pause': { code: 'MediaPlayPause' },
   'media:skip': { code: 'MediaTrackNext' },
+  'media:replay': { code: 'MediaTrackPrevious' },
 };
 
 let registered = {};
 
-function applyHotkeys({ enabled = true, bindings = {}, media = false } = {}) {
+function applyHotkeys({ enabled = true, bindings = {}, media = false, mediaReplay = true } = {}) {
   globalShortcut.unregisterAll();
   registered = {};
   const problems = {};
@@ -183,7 +184,11 @@ function applyHotkeys({ enabled = true, bindings = {}, media = false } = {}) {
     }
   }
   if (media) {
-    for (const [action, binding] of Object.entries(MEDIA_BINDINGS)) wanted.push([action, binding]);
+    for (const [action, binding] of Object.entries(MEDIA_BINDINGS)) {
+      // ⏮ is left to other apps while replay is switched off in the page.
+      if (action === 'media:replay' && !mediaReplay) continue;
+      wanted.push([action, binding]);
+    }
   }
 
   const taken = new Map();
@@ -249,6 +254,7 @@ function renderTray() {
     { type: 'separator' },
     { label: readerState.paused ? 'Resume reading' : 'Pause reading', accelerator: registered.pause, registerAccelerator: false, click: () => sendAction('pause') },
     { label: 'Skip message', accelerator: registered.skip, registerAccelerator: false, click: () => sendAction('skip') },
+    { label: 'Replay last message', accelerator: registered.replay, registerAccelerator: false, visible: readerState.replay !== false, click: () => sendAction('replay') },
     { label: 'Clear waiting messages', click: () => sendAction('clear') },
     { type: 'separator' },
     { label: win && win.isVisible() ? 'Hide window' : 'Show window', click: toggleWindow },
@@ -270,6 +276,7 @@ function buildMenu() {
       submenu: [
         { label: 'Pause / resume', click: () => sendAction('pause') },
         { label: 'Skip message', click: () => sendAction('skip') },
+        { label: 'Replay last message', click: () => sendAction('replay') },
         { label: 'Clear waiting messages', click: () => sendAction('clear') },
       ],
     },

@@ -35,12 +35,18 @@ const DEFAULTS = {
   skipCommands: true,
   skipLinks: false,
   ignoredUsers: '',
+  // Hearing read messages again: a key steps back one message per press.
+  replay: true,
+  replayAnnounce: true,  // say something when a replay starts and when it ends
+  replayStartText: 'Replaying.',
+  replayEndText: 'Back to live chat.',
   keys: {
     pause: { code: 'KeyP', alt: true, ctrl: false, shift: false, meta: false },
     skip: { code: 'KeyS', alt: true, ctrl: false, shift: false, meta: false },
     volumeUp: { code: 'ArrowUp', alt: true, ctrl: false, shift: false, meta: false },
     volumeDown: { code: 'ArrowDown', alt: true, ctrl: false, shift: false, meta: false },
     clear: { code: 'KeyC', alt: true, ctrl: false, shift: true, meta: false },
+    replay: { code: 'KeyR', alt: true, ctrl: false, shift: false, meta: false },
     toggleWindow: { code: 'KeyH', alt: true, ctrl: false, shift: true, meta: false },
   },
   mediaKeys: false,
@@ -63,10 +69,11 @@ const DEFAULTS = {
 // Switches that are one checkbox each, in the order they appear on the page.
 const APPEARANCE_SETTINGS = ['highContrast', 'reduceMotion'];
 const NUMBER_SETTINGS = ['maxLength', 'catchUp', 'cheerPriority', 'cheerEffects'];
+const TEXT_SETTINGS = ['replayStartText', 'replayEndText'];
 const CHECKBOX_SETTINGS = [
   ...APPEARANCE_SETTINGS, 'announce',
   'varyVoices', 'collapseNames', 'quoteParent', 'readEvents', 'readEmojis',
-  'skipCommands', 'skipLinks',
+  'skipCommands', 'skipLinks', 'replayAnnounce',
   'cheerAnnounce', 'highlightPriority', 'voiceConfirm',
 ];
 
@@ -290,6 +297,7 @@ const reader = {
   controller: null,
   paused: false,
   lastSpoken: null,
+  readCount: 0,     // numbers messages in the order they finished, for replay
 };
 
 const feedEntries = [];
@@ -343,6 +351,12 @@ function filterReason(entry) {
 
 function pump() {
   if (reader.paused || reader.current) return;
+  // A replay holds the live queue back until it's over.
+  if (replay.active) {
+    pumpReplay();
+    // Ending it may have paused reading again.
+    if (replay.active || reader.current || reader.paused) return;
+  }
 
   while (reader.queue.length) {
     const entry = reader.queue.shift();
@@ -366,6 +380,7 @@ function pump() {
       if (reader.controller !== controller) return;
       if (entry.status === 'speaking') {
         setStatus(entry, 'done');
+        entry.readSeq = ++reader.readCount;
         reader.lastSpoken = entry;
       }
       reader.current = null;
@@ -402,6 +417,7 @@ const ACTIONS = {
   volumeUp: () => setVolume(settings.volume + 5),
   volumeDown: () => setVolume(settings.volume - 5),
   clear: () => clearQueue(),
+  replay: () => { userGesture(); replayBack(); },
   toggleWindow: () => desktop && desktop.toggleWindow(),
   // Not bound to a key; the desktop app's Settings menu sends these. The
   // backup tab is opened first so its status line can be seen.
@@ -410,8 +426,12 @@ const ACTIONS = {
   importSettings: () => { openSettings('backup'); importSettings(); },
 };
 
+// An action that is switched off in the settings leaves its keys alone, so
+// they still reach the page or the app that has focus.
+const actionEnabled = (action) => action !== 'replay' || settings.replay;
+
 function runAction(action) {
-  if (ACTIONS[action]) ACTIONS[action]();
+  if (ACTIONS[action] && actionEnabled(action)) ACTIONS[action]();
 }
 
 function togglePause() {
@@ -443,6 +463,9 @@ function setRate(value) {
 function setPaused(paused) {
   if (reader.paused === paused) return;
   reader.paused = paused;
+  // Pausing or resuming during a replay takes over from whatever the replay
+  // would have done at the end.
+  if (replay.active) replay.pauseAfter = false;
   if (reader.controller) {
     if (paused) reader.controller.pause();
     else reader.controller.resume();
@@ -455,7 +478,8 @@ function setPaused(paused) {
 
 function skipCurrent() {
   if (!reader.current) return;
-  setStatus(reader.current, 'skipped', 'skipped');
+  // A replayed message was read once already, and stays marked as read.
+  if (!replay.active) setStatus(reader.current, 'skipped', 'skipped');
   reader.controller.stop();
   announce('Message skipped');
 }
@@ -486,12 +510,282 @@ function restartCurrent() {
   const entry = reader.current;
   if (!entry) return;
   const controller = reader.controller;
+  if (replay.active) {
+    // The replay hasn't moved on, so pump() says the same step again.
+    reader.current = null;
+    reader.controller = null;
+    controller.stop();
+    pump();
+    return;
+  }
   setStatus(entry, 'queued');
   reader.queue.unshift(entry);
   reader.current = null;
   reader.controller = null;
   controller.stop();
   pump();
+}
+
+// ---------------------------------------------------------------------------
+// Replay: hearing messages that were already read
+// ---------------------------------------------------------------------------
+
+// The replay key steps back one message per press, then reading carries on
+// in order up to where it was: three quick presses replay the last three
+// messages. While a replay runs, live chat waits in the queue.
+const replay = {
+  active: false,
+  phase: null,        // intro | item | outro
+  items: [],          // the messages being replayed, oldest first
+  index: 0,           // the one being read (or about to be)
+  pauseAfter: false,  // reading was paused when the replay started
+  stickToBottom: false,
+};
+
+// Messages that can be replayed: read to the end, and not taken down since.
+function replayable(entry) {
+  if (!entry || entry.status !== 'done' || !entry.readSeq || entry.removedByMod) return false;
+  return !(entry.kind === 'chat' && isIgnored(entry.login));
+}
+
+function newestRead() {
+  let best = null;
+  for (const e of feedEntries) if (replayable(e) && (!best || e.readSeq > best.readSeq)) best = e;
+  return best;
+}
+
+// The message read just before this one.
+function readBefore(entry) {
+  let best = null;
+  for (const e of feedEntries) {
+    if (replayable(e) && e.readSeq < entry.readSeq && (!best || e.readSeq > best.readSeq)) best = e;
+  }
+  return best;
+}
+
+function replayNoticeText(which) {
+  if (!settings.replayAnnounce) return '';
+  return (which === 'start' ? settings.replayStartText : settings.replayEndText).trim();
+}
+
+// The start and end notices are said by the reader itself, in the first voice
+// of the pool, without any per-chatter variation.
+function readerVoiceOptions(engine) {
+  return {
+    voiceId: voicePool(engine)[0],
+    rate: settings.rate,
+    speed: Math.min(2, Math.max(0.5, settings.rate)),
+    pitch: 1,
+    effect: null,
+  };
+}
+
+function replayCount(n) {
+  return `${n} message${n === 1 ? '' : 's'}`;
+}
+
+// The replay key, the Replay button and ⏮.
+function replayBack() {
+  if (!settings.replay) return;
+  if (!replay.active) {
+    const last = newestRead();
+    if (!last) return replayNote('Nothing has been read yet');
+    startReplay([last]);
+    return;
+  }
+
+  const finished = replay.phase === 'outro' || replay.index >= replay.items.length;
+  if (finished) {
+    // Everything was heard again already, so go on from the oldest one
+    // instead of repeating them all.
+    const older = readBefore(replay.items[0]);
+    if (!older) return replayNote('No older messages');
+    Object.assign(replay, { items: [older], index: 0, phase: 'item' });
+    interruptReplay();
+  } else if (replay.phase === 'intro') {
+    // Nothing has been read back yet; the intro carries on.
+    const older = readBefore(replay.items[0]);
+    if (!older) return replayNote('No older messages');
+    replay.items.unshift(older);
+  } else if (replay.index > 0) {
+    replay.index--;
+    interruptReplay();
+  } else {
+    const older = readBefore(replay.items[0]);
+    if (!older) return replayNote('No older messages');
+    replay.items.unshift(older);
+    interruptReplay();
+  }
+  if (reader.paused) setPaused(false);
+  renderNow();
+  announce(`Replaying ${replayCount(replay.items.length - replay.index)}`);
+}
+
+// The ↻ on a message in chat: replay that one, or jump to it if it's already
+// part of the replay.
+function replayEntry(entry) {
+  if (!settings.replay || !replayable(entry)) return;
+  userGesture();
+  if (!replay.active) {
+    startReplay([entry]);
+    return;
+  }
+  let at = replay.items.indexOf(entry);
+  if (at === -1) {
+    replay.items.push(entry);
+    at = replay.items.length - 1;
+  }
+  // Already queued up in this replay: it comes when it comes.
+  if (replay.phase === 'item' && at > replay.index) {
+    renderNow();
+    return;
+  }
+  Object.assign(replay, { index: at, phase: replay.phase === 'intro' ? 'intro' : 'item' });
+  if (replay.phase === 'item') interruptReplay();
+  if (reader.paused) setPaused(false);
+  renderNow();
+  announce(`Replaying a message from ${entry.displayName}`);
+}
+
+function startReplay(items) {
+  replay.stickToBottom = feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 60;
+  Object.assign(replay, { active: true, items, index: 0, phase: 'intro', pauseAfter: reader.paused });
+
+  // A live message that was being read goes back to the front of the queue,
+  // to be read in full once the replay is over.
+  if (reader.current) {
+    const entry = reader.current;
+    const controller = reader.controller;
+    reader.current = null;
+    reader.controller = null;
+    setStatus(entry, 'queued', 'after replay');
+    reader.queue.unshift(entry);
+    controller.stop();
+  }
+  // The replay plays even if reading was paused, and pauses again after.
+  if (reader.paused) {
+    reader.paused = false;
+    updateMediaSession();
+  }
+  announce(`Replaying ${replayCount(items.length)}`);
+  pump();
+  renderNow();
+}
+
+// Stops what the replay is saying without moving it on, so the next pump()
+// says whatever the replay points at now.
+function interruptReplay() {
+  const controller = reader.controller;
+  if (controller) {
+    reader.current = null;
+    reader.controller = null;
+    controller.stop();
+  }
+  pump();
+}
+
+function stopReplay() {
+  if (!replay.active) return;
+  const controller = reader.controller;
+  reader.current = null;
+  reader.controller = null;
+  endReplay();
+  if (controller) controller.stop();
+  pump();
+  renderNow();
+}
+
+function endReplay() {
+  replay.active = false;
+  replay.phase = null;
+  replay.items = [];
+  replay.index = 0;
+  // The next live message says who wrote it, whoever was read before.
+  reader.lastSpoken = null;
+  if (replay.stickToBottom) feedEl.scrollTop = feedEl.scrollHeight;
+  if (replay.pauseAfter) setPaused(true);
+  else announce('Replay finished');
+}
+
+// Says the next step of the replay: the start notice, the messages, then
+// the end notice. Called by pump(); ends the replay when nothing is left.
+function pumpReplay() {
+  if (replay.phase === 'intro') {
+    const text = replayNoticeText('start');
+    if (text) return speakReplayStep({ kind: 'replay', notice: 'start' }, text, () => { replay.phase = 'item'; });
+    replay.phase = 'item';
+  }
+  if (replay.phase === 'item') {
+    while (replay.index < replay.items.length) {
+      const entry = replay.items[replay.index];
+      // Replays always say who wrote it, even after the same chatter.
+      const text = replayable(entry) ? composeSpeech(entry, null, settings) : '';
+      if (text) return speakReplayStep(entry, text, () => { replay.index++; });
+      replay.index++;
+    }
+    replay.phase = 'outro';
+  }
+  const text = replayNoticeText('end');
+  if (text) return speakReplayStep({ kind: 'replay', notice: 'end' }, text, endReplay);
+  endReplay();
+}
+
+function speakReplayStep(entry, text, after) {
+  const engine = activeEngine();
+  const opts = entry.kind === 'replay' ? readerVoiceOptions(engine) : voiceOptionsFor(entry, engine);
+  entry.spokenText = text;
+  entry.engine = engine;
+  entry.voiceId = opts.voiceId;
+  reader.current = entry;
+
+  const controller = engine.speak(text, opts, { getVolume });
+  reader.controller = controller;
+  controller.done.then(() => {
+    if (reader.controller !== controller) return;
+    reader.current = null;
+    reader.controller = null;
+    after();
+    pump();
+    renderNow();
+  });
+
+  if (entry.node && entry.node.isConnected) entry.node.scrollIntoView({ block: 'nearest' });
+  prefetchReplay();
+  renderNow();
+}
+
+function prefetchReplay() {
+  if (activeEngine() !== kokoroEngine) return;
+  const from = replay.phase === 'intro' ? replay.index : replay.index + 1;
+  const items = replay.items.slice(from, from + 2).filter(replayable).map((entry) => {
+    const opts = voiceOptionsFor(entry, kokoroEngine);
+    return { text: composeSpeech(entry, null, settings), voiceId: opts.voiceId, speed: opts.speed };
+  });
+  const end = replayNoticeText('end');
+  if (items.length < 2 && end && from + items.length >= replay.items.length) {
+    const opts = readerVoiceOptions(kokoroEngine);
+    items.push({ text: end, voiceId: opts.voiceId, speed: opts.speed });
+  }
+  kokoroEngine.prefetch(items.filter((item) => item.text));
+}
+
+// A short line in the player for a replay key press that had nothing to do.
+let replayNoteTimer = null;
+function replayNote(text) {
+  const note = $('#replayNote');
+  note.textContent = text;
+  note.hidden = false;
+  clearTimeout(replayNoteTimer);
+  replayNoteTimer = setTimeout(() => { note.hidden = true; }, 2500);
+  announce(text);
+}
+
+// Turning replay off ends one that is running and gives its keys back.
+function applyReplaySetting() {
+  document.body.classList.toggle('replay-off', !settings.replay);
+  for (const id of TEXT_SETTINGS) $(`#${id}`).disabled = !settings.replay || !settings.replayAnnounce;
+  $('#replayAnnounce').disabled = !settings.replay;
+  if (!settings.replay) stopReplay();
 }
 
 // ---------------------------------------------------------------------------
@@ -922,10 +1216,13 @@ const chat = new TwitchChat({
   onUserNotice: (msg) => enqueue(entryFromUserNotice(msg)),
   onRoomState: (roomId) => loadThirdPartyEmotes(roomId),
   onClearChat: (userId) => {
-    const targets = [...reader.queue, reader.current].filter((e) => e && (!userId || e.userId === userId));
+    // Already read messages stay in the feed, but aren't replayed any more.
+    for (const e of feedEntries) if (!userId || e.userId === userId) e.removedByMod = true;
+    const targets = [...reader.queue, reader.current].filter((e) => e && e.kind !== 'replay' && (!userId || e.userId === userId));
     for (const entry of targets) removeFromQueue(entry, 'deleted', userId ? 'removed by mod' : 'chat cleared');
   },
   onDeleteMessage: (id) => {
+    for (const e of feedEntries) if (e.id === id) e.removedByMod = true;
     const entry = [...reader.queue, reader.current].find((e) => e && e.id === id);
     if (entry) removeFromQueue(entry, 'deleted', 'deleted by mod');
     else {
@@ -968,6 +1265,15 @@ function addToFeed(entry) {
     'aria-label': `Don’t read this message from ${entry.displayName}`,
     onclick: () => removeFromQueue(entry, 'skipped', 'removed'),
   }, '×');
+  // Takes the place of × once the message has been read.
+  const replayBtn = el('button', {
+    class: 'replay-btn',
+    type: 'button',
+    title: 'Hear this message again',
+    'aria-label': `Replay this message from ${entry.displayName}`,
+    onclick: () => replayEntry(entry),
+  }, '↻');
+  const replayEl = el('span', { class: 'replay-mark' });
 
   const name = el('button', {
     class: 'name',
@@ -992,7 +1298,7 @@ function addToFeed(entry) {
     entry.kind === 'announcement' ? el('span', { class: 'reply-to' }, 'announcement') : null,
     badges.map((b) => el('span', { class: 'badge' }, b)),
     entry.isReply ? el('span', { class: 'reply-to' }, `↩ replying to @${entry.parentDisplayName || entry.parentLogin}`) : null,
-    el('span', { class: 'tail' }, voiceBtn, stateEl, removeBtn),
+    el('span', { class: 'tail' }, voiceBtn, replayEl, stateEl, removeBtn, replayBtn),
   );
 
   const node = el('li', { class: `msg ${entry.kind}` },
@@ -1005,6 +1311,7 @@ function addToFeed(entry) {
   entry.node = node;
   entry.voiceBtn = voiceBtn;
   entry.stateEl = stateEl;
+  entry.replayEl = replayEl;
   feedEntries.push(entry);
   feedEl.append(node);
 
@@ -1062,6 +1369,8 @@ function renderNow() {
   const entry = reader.current;
   const state = reader.paused ? 'paused' : entry ? 'speaking' : 'idle';
   nowPanel.dataset.state = state;
+  nowPanel.dataset.replay = replay.active ? 'on' : 'off';
+  renderReplayMarks();
   $('#pauseBtn').setAttribute('aria-pressed', String(reader.paused));
   $('#pauseBtn').title = reader.paused ? 'Resume reading' : 'Pause reading';
   $('#pauseBtn').setAttribute('aria-label', reader.paused ? 'Resume reading' : 'Pause reading');
@@ -1069,14 +1378,21 @@ function renderNow() {
   const loading = entry && reader.controller && reader.controller.loading;
   $('#nowLabel').textContent = reader.paused
     ? (entry ? 'Paused on this message' : 'Paused')
+    : replay.active ? replayLabel()
     : loading ? 'Preparing voice…' : entry ? 'Reading' : 'Idle';
 
   const waiting = reader.queue.length;
-  $('#queueCount').textContent = `${waiting} waiting`;
+  $('#queueCount').textContent = replay.active && waiting ? `${waiting} waiting for live` : `${waiting} waiting`;
+  $('#replayStop').hidden = !replay.active;
+  $('#replayBtn').disabled = !replay.active && !newestRead();
 
   const msgEl = $('#nowMsg');
   msgEl.replaceChildren();
-  if (entry) {
+  if (entry && entry.kind === 'replay') {
+    // The reader's own start and end notice.
+    msgEl.append(el('span', { class: 'muted replay-notice' }, `“${entry.spokenText}”`));
+  } else if (entry) {
+    if (replay.active) msgEl.append(el('span', { class: 'replay-pill' }, `↻ from ${timeAgo(entry.receivedAt)}`), ' ');
     if (entry.kind !== 'event') {
       const name = el('span', { class: 'name' }, entry.displayName);
       name.style.color = entry.color && !settings.highContrast ? `color-mix(in oklab, ${entry.color} 72%, var(--fg))` : '';
@@ -1098,7 +1414,52 @@ function renderNow() {
 
   for (const e of feedEntries) e.node.classList.toggle('paused', e.status === 'speaking' && reader.paused);
 
-  if (desktop) desktop.setState({ paused: reader.paused, channel: chat.channel || '', waiting });
+  if (desktop) desktop.setState({ paused: reader.paused, channel: chat.channel || '', waiting, replay: settings.replay });
+}
+
+function replayLabel() {
+  const n = replay.items.length;
+  if (replay.phase === 'intro') return n > 1 ? `Replay · ${n} messages` : 'Replay';
+  if (replay.phase === 'outro' || replay.index >= n) return 'Replay finished';
+  return n > 1 ? `Replaying ${replay.index + 1} of ${n}` : 'Replaying';
+}
+
+function timeAgo(time) {
+  const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${seconds} s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  return `${Math.round(minutes / 60)} h ago`;
+}
+
+// Marks the messages in chat that belong to the replay: the one being read,
+// the ones still to come and the ones heard again already.
+const replayMarked = new Set();
+
+function renderReplayMarks() {
+  const marks = new Map();
+  if (replay.active) {
+    const n = replay.items.length;
+    replay.items.forEach((entry, i) => {
+      if (!entry.node) return;
+      const step = replay.phase === 'outro' || i < replay.index ? 'played'
+        : i === replay.index && replay.phase === 'item' ? 'current' : 'next';
+      const pos = n > 1 ? ` ${i + 1}/${n}` : '';
+      marks.set(entry, [step, step === 'current' ? `↻ replaying${pos}` : step === 'next' ? `↻ replay${pos}` : '↻ replayed']);
+    });
+  }
+  for (const entry of replayMarked) {
+    if (marks.has(entry)) continue;
+    delete entry.node.dataset.replay;
+    entry.replayEl.textContent = '';
+    replayMarked.delete(entry);
+  }
+  for (const [entry, [step, text]] of marks) {
+    entry.node.dataset.replay = step;
+    entry.replayEl.textContent = text;
+    replayMarked.add(entry);
+  }
 }
 
 function tickProgress() {
@@ -1602,7 +1963,7 @@ window.addEventListener('keydown', (e) => {
   const typing = e.target.closest && e.target.closest('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select, [contenteditable]');
 
   for (const [action, binding] of Object.entries(settings.keys)) {
-    if (!matches(binding)) continue;
+    if (!matches(binding) || !actionEnabled(action)) continue;
     if (typing && !(binding.ctrl || binding.alt || binding.meta)) return;
     // In the desktop app the OS already delivered this one, from whichever
     // window had focus; acting on it here too would run it twice.
@@ -1642,6 +2003,7 @@ function enableMediaKeys(on) {
       pause: () => setPaused(true),
       stop: () => setPaused(true),
       nexttrack: () => skipCurrent(),
+      previoustrack: () => runAction('replay'),
     };
     // Browsers throw for actions they don't support.
     for (const [action, handler] of Object.entries(handlers)) {
@@ -1650,7 +2012,7 @@ function enableMediaKeys(on) {
     updateMediaSession();
   } else {
     if (mediaKeys.audio) mediaKeys.audio.pause();
-    for (const action of ['play', 'pause', 'stop', 'nexttrack']) {
+    for (const action of ['play', 'pause', 'stop', 'nexttrack', 'previoustrack']) {
       try { session.setActionHandler(action, null); } catch {}
     }
     session.metadata = null;
@@ -1661,7 +2023,7 @@ function enableMediaKeys(on) {
 function updateMediaSession() {
   if (!settings.mediaKeys || !('mediaSession' in navigator)) return;
   if (typeof MediaMetadata === 'function') navigator.mediaSession.metadata = new MediaMetadata({
-    title: reader.paused ? 'Chat reading paused' : 'Reading chat',
+    title: reader.paused ? 'Chat reading paused' : replay.active ? 'Replaying chat' : 'Reading chat',
     artist: chat.channel ? `#${chat.channel}` : 'Chat Reader',
   });
   navigator.mediaSession.playbackState = reader.paused ? 'paused' : 'playing';
@@ -1675,8 +2037,10 @@ function syncGlobalHotkeys() {
   if (!desktop) return;
   desktop.applyHotkeys({
     enabled: settings.globalHotkeys,
-    bindings: settings.keys,
+    // A switched-off action doesn't take its keys from other apps.
+    bindings: Object.fromEntries(Object.entries(settings.keys).filter(([action]) => actionEnabled(action))),
     media: settings.mediaKeys,
+    mediaReplay: settings.replay,
   }).then((result) => {
     globalHotkeys.registered = result.registered || {};
     globalHotkeys.problems = result.problems || {};
@@ -1689,6 +2053,7 @@ function renderHotkeyState() {
   if (!desktop) return;
 
   for (const button of $$('[data-bind]')) {
+    if (!actionEnabled(button.dataset.bind)) continue;
     const problem = settings.globalHotkeys ? globalHotkeys.problems[button.dataset.bind] : null;
     const note = button.closest('.keybind').querySelector('.hotkey-note');
     note.textContent = problem || '';
@@ -1696,7 +2061,7 @@ function renderHotkeyState() {
     button.classList.toggle('conflict', !!problem);
   }
 
-  const MEDIA_LABELS = { 'media:pause': '⏯', 'media:skip': '⏭' };
+  const MEDIA_LABELS = { 'media:pause': '⏯', 'media:skip': '⏭', 'media:replay': '⏮' };
   const taken = Object.keys(globalHotkeys.registered)
     .map((action) => MEDIA_LABELS[action] || keyLabel(settings.keys[action]))
     .filter((label, i, all) => all.indexOf(label) === i);
@@ -1917,6 +2282,10 @@ const SETTING_CHECKS = {
   skipCommands: accept.bool,
   skipLinks: accept.bool,
   ignoredUsers: accept.text(4000),
+  replay: accept.bool,
+  replayAnnounce: accept.bool,
+  replayStartText: accept.text(200),
+  replayEndText: accept.text(200),
   keys: acceptKeys,
   mediaKeys: accept.bool,
   globalHotkeys: accept.bool,
@@ -1962,8 +2331,9 @@ function syncControlsFromSettings() {
   $('#emoteMode').value = settings.emoteMode;
   $('#ignoredUsers').value = settings.ignoredUsers;
   for (const key of NUMBER_SETTINGS) $(`#${key}`).value = settings[key];
+  for (const key of TEXT_SETTINGS) $(`#${key}`).value = settings[key];
   for (const key of ['voiceCommand', 'modCommand', 'voiceCommandWho', 'modCommandWho']) $(`#${key}`).value = settings[key];
-  for (const key of [...CHECKBOX_SETTINGS, 'readEmoteOnly', 'mediaKeys', 'globalHotkeys']) {
+  for (const key of [...CHECKBOX_SETTINGS, 'readEmoteOnly', 'replay', 'mediaKeys', 'globalHotkeys']) {
     $(`#${key}`).checked = !!settings[key];
   }
 }
@@ -1989,6 +2359,7 @@ function applyAllSettings() {
   loadThirdPartyEmotes();
   refreshSpeechBodies();
   refreshVoiceTags();
+  applyReplaySetting();
   renderNow();
   syncGlobalHotkeys();
   enableMediaKeys(settings.mediaKeys);
@@ -2034,6 +2405,8 @@ $('#connectForm').addEventListener('submit', (e) => {
 $('#pauseBtn').addEventListener('click', () => { userGesture(); togglePause(); });
 $('#skipBtn').addEventListener('click', skipCurrent);
 $('#clearBtn').addEventListener('click', clearQueue);
+$('#replayBtn').addEventListener('click', () => runAction('replay'));
+$('#replayStop').addEventListener('click', stopReplay);
 
 $('#volume').addEventListener('input', (e) => setVolume(Number(e.target.value), { live: true }));
 $('#volume').addEventListener('change', () => {
@@ -2165,6 +2538,27 @@ for (const key of NUMBER_SETTINGS) {
   });
 }
 
+$('#replay').addEventListener('change', (e) => {
+  settings.replay = e.target.checked;
+  saveSettings();
+  applyReplaySetting();
+  syncGlobalHotkeys();
+  renderNow();
+});
+$('#replayAnnounce').addEventListener('change', applyReplaySetting);
+for (const key of TEXT_SETTINGS) {
+  $(`#${key}`).addEventListener('change', (e) => {
+    settings[key] = e.target.value.trim().slice(0, 200);
+    e.target.value = settings[key];
+    saveSettings();
+  });
+}
+$$('[data-hear]').forEach((button) => button.addEventListener('click', () => {
+  const text = settings[button.dataset.hear].trim();
+  const engine = activeEngine();
+  if (text && engine.preview) previewVoice(engine, readerVoiceOptions(engine).voiceId, text);
+}));
+
 $('#ignoredUsers').addEventListener('input', (e) => { settings.ignoredUsers = e.target.value; saveSettings(); });
 
 for (const button of $$('[data-bind]')) {
@@ -2252,6 +2646,7 @@ renderKeyLabels();
 renderNicknames();
 renderRewards();
 renderCommandHints();
+applyReplaySetting();
 renderNow();
 
 {

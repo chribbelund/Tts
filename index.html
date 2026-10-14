@@ -39,7 +39,11 @@
         <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4.8v14.4a1 1 0 0 0 1.5.86l11.3-7.2a1 1 0 0 0 0-1.72L9.5 3.94A1 1 0 0 0 8 4.8z"/></svg>
       </button>
       <div class="now-body">
-        <div class="now-label"><span id="nowLabel">Idle</span><span class="sep" aria-hidden="true">·</span><span id="queueCount">0 waiting</span></div>
+        <div class="now-label">
+          <span id="nowLabel">Idle</span><span class="sep" aria-hidden="true">·</span><span id="queueCount">0 waiting</span>
+          <span id="replayNote" class="replay-note" hidden></span>
+          <button type="button" id="replayStop" class="link replay-stop" hidden>Stop replay</button>
+        </div>
         <div class="now-msg" id="nowMsg"><span class="muted">Nothing is being read right now.</span></div>
         <div class="progress" id="nowProgress" role="progressbar" aria-label="Progress through the message" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="nowBar"></i></div>
       </div>
@@ -48,6 +52,7 @@
       <div class="btn-row">
         <button id="skipBtn" class="btn">Skip</button>
         <button id="clearBtn" class="btn">Clear queue</button>
+        <button id="replayBtn" class="btn replay-only" title="Hear the last message again. Press again to go further back.">↻ Replay</button>
       </div>
       <label class="slider">
         <span>Volume</span>
@@ -61,7 +66,7 @@
       </label>
     </div>
     <div class="now-foot">
-      <div class="key-hint">Pause/resume <kbd data-key-label="pause"></kbd> <span class="sep" aria-hidden="true">·</span> Skip <kbd data-key-label="skip"></kbd></div>
+      <div class="key-hint">Pause/resume <kbd data-key-label="pause"></kbd> <span class="sep" aria-hidden="true">·</span> Skip <kbd data-key-label="skip"></kbd><span class="replay-only"> <span class="sep" aria-hidden="true">·</span> Replay <kbd data-key-label="replay"></kbd></span></div>
       <button type="button" id="voiceChip" class="voice-chip" data-state="unloaded">
         <span class="dot" aria-hidden="true"></span><span id="voiceChipText">Voices</span>
       </button>
@@ -203,6 +208,25 @@
             <label for="catchUp">Skip old messages when more than</label>
             <input type="number" id="catchUp" min="0" max="500" step="1"> <span class="hint">waiting (0 = read everything)</span>
           </div>
+
+          <h3 class="sub-head">Replay</h3>
+          <label class="check"><input type="checkbox" id="replay"> Let me hear messages again after they were read</label>
+          <p class="hint replay-only">Press <kbd data-key-label="replay"></kbd> or <em>↻ Replay</em> to hear the last message again. Each press goes one message further back, then reading carries on in order up to where it was. New messages wait until the replay is over. The ↻ next to a read message replays just that one.</p>
+          <label class="check replay-only"><input type="checkbox" id="replayAnnounce"> Say something when a replay starts and ends</label>
+          <div class="field replay-only">
+            <label class="row-label" for="replayStartText">When a replay starts</label>
+            <div class="chatter-row">
+              <input type="text" id="replayStartText" spellcheck="false" autocomplete="off" maxlength="200">
+              <button type="button" class="btn small" data-hear="replayStartText">Hear it</button>
+            </div>
+          </div>
+          <div class="field replay-only">
+            <label class="row-label" for="replayEndText">When it’s over</label>
+            <div class="chatter-row">
+              <input type="text" id="replayEndText" spellcheck="false" autocomplete="off" maxlength="200">
+              <button type="button" class="btn small" data-hear="replayEndText">Hear it</button>
+            </div>
+          </div>
         </section>
         <section class="tab-panel" role="tabpanel" id="panel-nicknames" aria-labelledby="tab-nicknames" tabindex="0" hidden>
           <p class="hint">Say a different name for a chatter, in their messages, in replies and in @mentions. Click a name in chat to set one without coming here.</p>
@@ -301,6 +325,11 @@
             <button type="button" class="btn small keycap" data-bind="clear"></button>
             <small class="hotkey-note" hidden></small>
           </div>
+          <div class="field keybind replay-only">
+            <span id="bind-replay">Replay (again to go further back)</span>
+            <button type="button" class="btn small keycap" data-bind="replay"></button>
+            <small class="hotkey-note" hidden></small>
+          </div>
           <div class="field keybind desktop-only">
             <span id="bind-toggleWindow">Show / hide the window</span>
             <button type="button" class="btn small keycap" data-bind="toggleWindow"></button>
@@ -309,7 +338,7 @@
           <p class="hint">Click a shortcut and press the keys you want. Backspace clears it, Esc keeps the old one.</p>
 
           <label class="check desktop-only"><input type="checkbox" id="globalHotkeys"> Let these work while another app is focused</label>
-          <label class="check"><input type="checkbox" id="mediaKeys"> Use the keyboard’s ⏯ media key too, for pause and skip</label>
+          <label class="check"><input type="checkbox" id="mediaKeys"> Use the keyboard’s media keys too: ⏯ pauses, ⏭ skips and ⏮ replays</label>
           <p class="hint browser-only">Normal shortcuts work while this tab is focused. The media key also works while you’re in a game.</p>
           <p class="hint desktop-only" id="hotkeyStatus" role="status"></p>
           <p class="hint desktop-only" id="accessibilityNote" hidden>

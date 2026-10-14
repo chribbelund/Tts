@@ -48,6 +48,7 @@ you want. Backspace clears one, Esc keeps the old one.
 | Skip message | `Alt+S` (`⌥S`) |
 | Volume up / down, in steps of 5 | `Alt+↑` / `Alt+↓` |
 | Clear waiting messages | `Alt+Shift+C` |
+| Replay (press again to go further back) | `Alt+R` (`⌥R`) |
 | Show / hide the window | `Alt+Shift+H` |
 
 - An ordinary key needs at least one modifier, because a global shortcut takes that
@@ -59,7 +60,7 @@ you want. Backspace clears one, Esc keeps the old one.
   and its *Backup* tab.
 - Turning off *Let these work while another app is focused* makes the shortcuts behave
   like the web version: only inside the window.
-- *Use the keyboard's ⏯ media key* adds ⏯ and ⏭ on top of your own shortcuts. macOS
+- *Use the keyboard's media keys* adds ⏯, ⏭ and ⏮ (replay) on top of your own shortcuts. macOS
   only sends media keys to apps allowed under System Settings → Privacy & Security →
   Accessibility, and the app offers a button that asks for it.
 
@@ -124,6 +125,13 @@ Notes:
 - **Pause on a message:** press **Alt+P** (⌥P on Mac) or the big button. Reading stops mid-message and new messages keep queueing. Pressing it again continues that same message.
   - Neural voices resume at the exact point.
   - System voices resume from the last word spoken, or from the start of the sentence if the voice doesn't report word positions.
+- **Replay:** press **Alt+R** (⌥R) or *↻ Replay* to hear the last message again. Each press goes one message further back, then reading carries on in order up to where it was, so three quick presses replay the last three messages. While a replay runs:
+  - The player turns teal and says *Replaying 2 of 3*, with a *Stop replay* link. In chat, the message being replayed is highlighted and the ones still to come have a dashed edge.
+  - New messages wait. A message that was being read when you pressed it goes back to the front of the queue and is read in full afterwards.
+  - Replays always say who wrote the message, and play even while reading is paused. Reading pauses again once the replay is over.
+  - The ↻ next to a read message replays just that one. Messages removed by a mod are never replayed.
+
+  Under *Settings → Reading → Replay* you can turn it off, which also frees the key for other apps. You can also change what is said when a replay starts (*"Replaying."*) and ends (*"Back to live chat."*), or have nothing said.
 - **Skip:** Alt+S. You can remove waiting messages with ×. Both shortcuts can be rebound under *Settings → Keys*.
 - **Media key:** turn on *Use the keyboard's ⏯ media key* to pause and resume while a game or another app is focused. Normal shortcuts only work while the tab is focused, which is a browser limitation — the [desktop app](#desktop-app) has no such limit and makes every shortcut work from any app.
 - **Volume and speed:** with neural voices, volume changes apply instantly.

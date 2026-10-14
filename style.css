@@ -11,6 +11,7 @@
   --ok: #15803d;
   --warn: #b45309;
   --bad: #c0262d;
+  --replay: #0e7490;
   --radius: 12px;
   --shadow: 0 1px 2px rgba(20, 10, 40, .06), 0 4px 16px rgba(20, 10, 40, .04);
   /* Raised by the "stronger contrast" switch; see [data-contrast="high"]. */
@@ -37,6 +38,7 @@
     --ok: #4ade80;
     --warn: #fbbf24;
     --bad: #f87171;
+    --replay: #22d3ee;
     --shadow: none;
     color-scheme: dark;
   }
@@ -54,6 +56,7 @@
   --ok: #4ade80;
   --warn: #fbbf24;
   --bad: #f87171;
+  --replay: #22d3ee;
   --shadow: none;
   color-scheme: dark;
 }
@@ -70,6 +73,7 @@
   --ok: #0f6b31;
   --warn: #8a4200;
   --bad: #a3131a;
+  --replay: #0b5566;
   --focus-width: 3px;
   --border-strong: 2px;
 }
@@ -87,6 +91,7 @@
     --ok: #7ff0a3;
     --warn: #ffd04d;
     --bad: #ff9c9c;
+    --replay: #67e8f9;
     --focus-width: 3px;
     --border-strong: 2px;
   }
@@ -104,6 +109,7 @@
   --ok: #7ff0a3;
   --warn: #ffd04d;
   --bad: #ff9c9c;
+  --replay: #67e8f9;
   --focus-width: 3px;
   --border-strong: 2px;
 }
@@ -349,6 +355,57 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .msg[data-status="speaking"] .state { color: var(--accent); font-weight: 600; }
 .msg[data-status="speaking"].paused .state { color: var(--warn); }
 
+/* ---------- replay ---------- */
+/* Replays get a colour of their own, so they can't be mistaken for the
+   live message (accent) or a paused one (warn). */
+.now[data-replay="on"] { border-color: var(--replay); box-shadow: 0 0 0 1px var(--replay), var(--shadow); }
+.now[data-replay="on"]:not([data-state="paused"]) #nowLabel { color: var(--replay); }
+.now[data-replay="on"]:not([data-state="paused"]) .progress i { background: var(--replay); }
+.replay-stop { margin-left: auto; font-size: 12px; color: var(--replay); font-weight: 600; }
+.replay-note { margin-left: auto; color: var(--muted); font-style: italic; }
+.replay-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 7px;
+  border-radius: 99px;
+  color: var(--replay);
+  border: 1px solid var(--replay);
+  vertical-align: 2px;
+}
+.replay-notice { font-style: italic; }
+
+.replay-mark { font-size: 11px; color: var(--replay); font-weight: 600; white-space: nowrap; }
+.replay-mark:empty { display: none; }
+.msg[data-replay] .state { display: none; }
+.msg[data-replay] { opacity: 1; }
+.msg[data-replay="current"] {
+  background: color-mix(in srgb, var(--replay) 13%, transparent);
+  border-left-color: var(--replay);
+}
+.msg[data-replay="next"] { border-left: 3px dashed color-mix(in srgb, var(--replay) 60%, transparent); }
+.msg[data-replay="played"] .replay-mark { color: var(--muted); font-weight: 400; }
+
+/* ↻ sits where × was, once a message has been read. */
+.replay-btn {
+  display: none;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  min-width: 24px;
+  min-height: 24px;
+  place-items: center;
+}
+.replay-btn:hover { color: var(--replay); }
+.msg[data-status="done"]:not([data-replay="current"]) .replay-btn { display: grid; }
+.msg[data-status="done"] .x { display: none; }
+body.replay-off .replay-only, body.replay-off .replay-btn { display: none !important; }
+
 /* ---------- settings dialog ---------- */
 .settings-dialog {
   width: min(760px, calc(100% - 32px));
@@ -430,7 +487,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .row-label.with-actions { display: flex; justify-content: space-between; align-items: baseline; }
 .mini-actions { display: flex; gap: 10px; }
 .hint { font-size: 12px; color: var(--muted); margin: 0; }
-select, textarea, .field input[type="number"] {
+select, textarea, .field input[type="number"], .tab-panel input[type="text"] {
   padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -616,7 +673,7 @@ body.is-desktop .browser-only { display: none; }
 .chatter-dialog .dialog-box { height: auto; }
 .chatter-body { padding: 18px 20px 4px; display: flex; flex-direction: column; gap: 16px; }
 .chatter-row { display: flex; align-items: center; gap: 8px; }
-.chatter-row select { flex: 1; min-width: 0; }
+.chatter-row select, .chatter-row input { flex: 1; min-width: 0; }
 .chatter-row .hint { flex: 1; }
 .chatter-body input {
   min-width: 0;
@@ -664,6 +721,8 @@ body.is-desktop .browser-only { display: none; }
 [data-contrast="high"] .link, [data-contrast="high"] .msg button.name { text-decoration: underline; }
 [data-contrast="high"] .voice-chip, [data-contrast="high"] .tabs [role="tab"] { color: var(--fg); }
 [data-contrast="high"] .tabs [role="tab"][aria-selected="true"] { box-shadow: 0 0 0 var(--border-strong) var(--fg); }
+[data-contrast="high"] .replay-mark, [data-contrast="high"] .replay-stop { text-decoration: underline; }
+[data-contrast="high"] .msg[data-replay="current"] { border-left-width: 6px; }
 [data-contrast="high"] .progress { background: var(--panel-2); box-shadow: 0 0 0 1px var(--line); }
 
 /* ---------- less motion ---------- */
