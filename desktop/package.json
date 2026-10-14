@@ -1,7 +1,7 @@
 {
   "name": "chat-reader-desktop",
   "productName": "Chat Reader",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Reads a Twitch channel's chat out loud, with hotkeys that work while you're in a game.",
   "homepage": "https://github.com/chribbelund/Tts",
   "author": {
