@@ -1,6 +1,8 @@
 # Chat Reader: Twitch TTS
 
 Reads a Twitch channel's chat out loud in the browser. No login, no install, no server-side code.
+The [desktop app](#desktop-app) can also read YouTube and TikTok live chat, together with
+Twitch, in one queue: see [YouTube and TikTok](#youtube-and-tiktok).
 
 ## Run it
 
@@ -18,9 +20,10 @@ Chrome or Edge is recommended. Neural voices need HTTPS, or `localhost`.
 
 ## Desktop app
 
-The desktop app is this same page in a small Electron shell, with the one thing a
+The desktop app is this same page in a small Electron shell, with two things a
 browser can't do: the shortcuts are registered with the operating system, so they
-work while a game, Discord or anything else is focused.
+work while a game, Discord or anything else is focused, and it can read
+[YouTube and TikTok](#youtube-and-tiktok) chat as well as Twitch.
 
 Download the build for your system from the
 [releases page](https://github.com/chribbelund/Tts/releases).
@@ -139,6 +142,50 @@ Notes:
 - **Readable at any size:** a light, dark or system theme, a stronger-contrast mode, and a *size of everything* setting that scales the whole page up to 200% without a sideways scrollbar. See [Accessibility](#accessibility).
 - **Backup:** save every setting to a file and load it back, on this computer or another one. See [Your settings](#your-settings).
 
+## YouTube and TikTok
+
+Desktop app only. Twitch's field is always there; press **+** next to it to add a
+YouTube or TikTok field, fill in what you want and press *Connect*. Messages from every
+chat go into the same queue and are read in the order they arrive, each with a small
+tag saying where it came from. The × on a field takes that chat away again.
+
+| Field | What it takes |
+|---|---|
+| YouTube | `@handle`, a channel link, a channel id (`UC…`), or a link to the stream itself (`watch?v=…`, `youtu.be/…`, `/live/…`) |
+| TikTok | `@username` or a `tiktok.com/@username` link |
+
+- **Before you go live:** a channel or username that isn't live yet is fine. The field
+  waits, checking every 30 seconds, and starts reading when the stream starts. It goes
+  back to waiting when the stream ends. A link to one particular YouTube stream stops
+  when that stream ends.
+- **Each field has its own dot:** green while reading, blinking while connecting or
+  waiting, red when something is wrong. Hover over the field for the details. The status
+  line names every chat being read.
+- **Changing one chat leaves the others alone:** after editing a field the button says
+  *Connect* again and only reconnects what changed. When nothing has changed, it says
+  *Disconnect* and stops them all.
+- **YouTube:** Super Chats and Super Stickers are read as *"Alice sent a Super Chat of
+  $5.00: …"*, and never skipped to catch up. New members and gifted memberships are
+  events, like Twitch subs. Channel emotes are handled like Twitch emotes. Messages a
+  moderator removes, and everything from someone who is timed out or banned, come out of
+  the queue.
+- **TikTok:** gifts are events, *"Alice sent 5 Roses"*, said once at the end of a
+  streak. Deleted comments come out of the queue.
+- **Nicknames, voices and ignoring** work the same way: click a name in chat. A YouTube
+  or TikTok chatter is kept apart from a Twitch chatter with the same name.
+- **Chat commands** (`!voice`, `!tts`) work from every chat. YouTube and TikTok
+  moderators count as mods, members and TikTok subscribers as subscribers. Bits and
+  channel points are Twitch-only.
+
+How it works: neither site lets a web page read its chat (they send no CORS headers), so
+the app's main process reads them and hands each message to the page.
+- **YouTube** is read the same way youtube.com's own chat pop-out reads it. No API key,
+  sign-in or quota.
+- **TikTok** has no public chat API. The app uses
+  [tiktok-live-connector](https://github.com/zerodytrash/TikTok-Live-Connector), which
+  connects through Euler Stream's free signing service. It is unofficial, so it can break
+  when TikTok changes something, and a busy sign server shows up as *"retrying in …"*.
+
 ## Viewer interactions
 
 Under *Settings → Viewers*. The page reads chat without logging in, so it can only
@@ -253,6 +300,7 @@ For system voices, Microsoft Edge offers the most natural free options, the "…
 - `index.html`, `style.css`: UI
 - `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`: tab and bookmark icons
 - `js/irc.js`: anonymous Twitch chat connection (IRC over WebSocket)
+- `js/sources.js`: the page's side of YouTube and TikTok chat: reading the fields, and messages from the desktop app
 - `js/emotes.js`: 7TV, BetterTTV and FrankerFaceZ emote names for the connected channel
 - `js/speech-text.js`: turns chat messages into natural spoken sentences
 - `js/engines.js`: the neural and system speech engines, both supporting pause and resume
@@ -260,4 +308,5 @@ For system voices, Microsoft Edge offers the most natural free options, the "…
 - `Caddyfile`: server config with a CSP that allows the neural voices
 - `js/app.js`: queue, pause logic, settings, keybindings
 - `desktop/`: the Electron shell — window, tray, global hotkeys (`main.js`, `accelerator.js`, `preload.js`) and the packaging config
+- `desktop/sources/`: YouTube (`youtube.js`) and TikTok (`tiktok.js`) chat, read in the app's main process
 - `.github/workflows/desktop.yml`: builds the desktop binaries and publishes them on a `v*` tag

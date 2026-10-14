@@ -2,7 +2,7 @@
   "name": "chat-reader-desktop",
   "productName": "Chat Reader",
   "version": "1.2.0",
-  "description": "Reads a Twitch channel's chat out loud, with hotkeys that work while you're in a game.",
+  "description": "Reads Twitch, YouTube and TikTok chat out loud, with hotkeys that work while you’re in a game.",
   "homepage": "https://github.com/chribbelund/Tts",
   "author": {
     "name": "Christoffer Lundqvist"
@@ -21,5 +21,8 @@
   "devDependencies": {
     "electron": "^44.7.2",
     "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "tiktok-live-connector": "2.5.0"
   }
 }

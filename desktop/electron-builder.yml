@@ -6,12 +6,14 @@ directories:
   buildResources: build
   output: dist
 
-# Only the shell and the copied page; node_modules holds build tools alone.
+# Only the shell and the copied page. electron-builder adds the production
+# dependencies (the TikTok connector) from node_modules on its own.
 # build/icon.png is also read at runtime, for the tray and window icons.
 files:
   - main.js
   - preload.js
   - accelerator.js
+  - sources/**/*
   - package.json
   - build/icon.png
   - web/**/*

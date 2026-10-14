@@ -30,6 +30,16 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
   saveFile: (name, text) => ipcRenderer.invoke('settings:save', { name, text }),
   openFile: () => ipcRenderer.invoke('settings:open'),
 
+  // YouTube and TikTok chat, which only the app can reach. Each event is
+  // { platform, type: 'status' | 'message' | 'delete' | 'clear', … }.
+  connectSource: (platform, target) => ipcRenderer.invoke('source:connect', { platform, target }),
+  disconnectSource: (platform) => ipcRenderer.invoke('source:disconnect', { platform }),
+  onSourceEvent: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('source:event', listener);
+    return () => ipcRenderer.off('source:event', listener);
+  },
+
   toggleWindow: () => ipcRenderer.send('window:toggle'),
   hideWindow: () => ipcRenderer.send('window:hide'),
   openExternal: (url) => ipcRenderer.send('shell:open-external', url),

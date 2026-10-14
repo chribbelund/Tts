@@ -19,8 +19,32 @@
 <header class="topbar">
   <h1 class="brand"><span class="brand-mark" aria-hidden="true"></span>Chat Reader</h1>
   <form id="connectForm" class="connect" autocomplete="off">
-    <label class="sr-only" for="channelInput">Twitch channel</label>
-    <input id="channelInput" placeholder="Channel name or twitch.tv link" spellcheck="false">
+    <!-- Twitch is always there. YouTube and TikTok are added with the + button,
+         and only in the desktop app, which is the only place they can be read.
+         The dot in each field shows that chat's own connection. -->
+    <div class="source-field" data-platform="twitch" data-state="idle">
+      <label class="source-tag" for="channelInput"><span class="dot" aria-hidden="true"></span>Twitch</label>
+      <input id="channelInput" placeholder="Channel or twitch.tv link" spellcheck="false">
+    </div>
+    <div class="source-field desktop-only" data-platform="youtube" data-state="idle" hidden>
+      <label class="source-tag" for="youtubeInput"><span class="dot" aria-hidden="true"></span>YouTube</label>
+      <input id="youtubeInput" placeholder="@handle or video link" spellcheck="false">
+      <button type="button" class="x source-remove" data-remove="youtube" title="Stop reading YouTube" aria-label="Remove YouTube">×</button>
+    </div>
+    <div class="source-field desktop-only" data-platform="tiktok" data-state="idle" hidden>
+      <label class="source-tag" for="tiktokInput"><span class="dot" aria-hidden="true"></span>TikTok</label>
+      <input id="tiktokInput" placeholder="@username" spellcheck="false">
+      <button type="button" class="x source-remove" data-remove="tiktok" title="Stop reading TikTok" aria-label="Remove TikTok">×</button>
+    </div>
+    <div class="source-add desktop-only" id="sourceAdd">
+      <button type="button" id="sourceAddBtn" class="btn add-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="sourceAddMenu" title="Read YouTube or TikTok chat too" aria-label="Add YouTube or TikTok chat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <div id="sourceAddMenu" class="source-menu" role="menu" aria-label="Add a chat" hidden>
+        <button type="button" role="menuitem" data-add="youtube" tabindex="-1"><span class="menu-dot" data-platform="youtube" aria-hidden="true"></span>YouTube</button>
+        <button type="button" role="menuitem" data-add="tiktok" tabindex="-1"><span class="menu-dot" data-platform="tiktok" aria-hidden="true"></span>TikTok</button>
+      </div>
+    </div>
     <button id="connectBtn" type="submit" class="btn primary">Connect</button>
   </form>
   <div id="status" class="status" data-state="idle" role="status"><span class="dot" aria-hidden="true"></span><span id="statusText">Not connected</span></div>
@@ -74,7 +98,7 @@
       <button id="testBtn" class="btn ghost small">Add test messages</button>
     </div>
     <ol id="feed" class="feed" tabindex="-1" aria-labelledby="chatHeading" aria-live="off"></ol>
-    <div id="feedEmpty" class="empty">Enter a channel above and press Connect. Messages show up here as they arrive and are read in order.</div>
+    <div id="feedEmpty" class="empty">Enter a channel above and press Connect<span class="desktop-only-inline">. Press + to read YouTube or TikTok chat at the same time</span>. Messages show up here as they arrive and are read in order.</div>
   </section>
 </main>
 
@@ -183,7 +207,7 @@
           </div>
           <label class="check"><input type="checkbox" id="collapseNames"> Don’t repeat the name for back-to-back messages</label>
           <label class="check"><input type="checkbox" id="quoteParent"> For replies, also read the message being replied to</label>
-          <label class="check"><input type="checkbox" id="readEvents"> Read subs, raids and announcements</label>
+          <label class="check"><input type="checkbox" id="readEvents"> Read subs, raids, gifts and announcements</label>
           <label class="check"><input type="checkbox" id="readEmojis"> Read emojis</label>
           <div class="field">
             <label class="row-label" for="emoteMode">Emotes</label>
@@ -205,7 +229,7 @@
           </div>
         </section>
         <section class="tab-panel" role="tabpanel" id="panel-nicknames" aria-labelledby="tab-nicknames" tabindex="0" hidden>
-          <p class="hint">Say a different name for a chatter, in their messages, in replies and in @mentions. Click a name in chat to set one without coming here.</p>
+          <p class="hint">Say a different name for a chatter, in their messages, in replies and in @mentions. Click a name in chat to set one without coming here<span class="desktop-only-inline">, which is also how to give one to a YouTube or TikTok chatter</span>.</p>
           <ul id="nicknameList" class="nick-list" aria-label="Nicknames"></ul>
           <p id="nicknameEmpty" class="hint nick-empty">No nicknames yet.</p>
           <form id="nicknameForm" class="nick-add" autocomplete="off" novalidate>
@@ -380,6 +404,7 @@
 <div id="srAnnounce" class="sr-only" role="status" aria-live="polite"></div>
 
 <script src="js/irc.js"></script>
+<script src="js/sources.js"></script>
 <script src="js/emotes.js"></script>
 <script src="js/speech-text.js"></script>
 <script src="js/engines.js"></script>

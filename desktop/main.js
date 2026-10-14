@@ -4,6 +4,8 @@ const { app, BrowserWindow, Menu, Notification, Tray, dialog, globalShortcut, ip
 const fs = require('node:fs');
 const path = require('node:path');
 const { toAccelerator, isMediaKey } = require('./accelerator');
+const { YouTubeChat } = require('./sources/youtube');
+const { TikTokChat } = require('./sources/tiktok');
 
 // Chromium won't play audio until the page has been clicked. A reader that is
 // started or resumed by a hotkey has no click to wait for, so allow it up front.
@@ -29,7 +31,7 @@ let win = null;
 let tray = null;
 let quitting = false;
 let toldAboutTray = false;
-let readerState = { paused: false, channel: '', waiting: 0 };
+let readerState = { paused: false, channel: '', where: '', waiting: 0 };
 
 // ---------------------------------------------------------------------------
 // Window
@@ -79,7 +81,14 @@ function createWindow() {
     confirmClose();
   });
 
-  win.on('closed', () => { win = null; });
+  // A reload or a crashed page starts over with nothing connected, so the
+  // chats it had open here would keep feeding a page that forgot them.
+  win.webContents.on('did-start-navigation', ({ isMainFrame, isSameDocument }) => {
+    if (isMainFrame && !isSameDocument) stopSources();
+  });
+  win.webContents.on('render-process-gone', stopSources);
+
+  win.on('closed', () => { win = null; stopSources(); });
 }
 
 let askingToClose = false;
@@ -241,7 +250,7 @@ function buildTray() {
 
 function renderTray() {
   if (!tray) return;
-  const where = readerState.channel ? `#${readerState.channel}` : 'Not connected';
+  const where = readerState.where || (readerState.channel ? `#${readerState.channel}` : 'Not connected');
   const waiting = readerState.waiting ? ` (${readerState.waiting} waiting)` : '';
   tray.setToolTip(`Chat Reader — ${where}${waiting}`);
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -311,7 +320,7 @@ if (!app.requestSingleInstanceLock()) {
   // you're looking at something else.
   app.on('window-all-closed', () => {});
   app.on('before-quit', () => { quitting = true; });
-  app.on('will-quit', () => globalShortcut.unregisterAll());
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); stopSources(); });
 }
 
 ipcMain.handle('hotkeys:apply', (_event, payload) => {
@@ -363,6 +372,46 @@ ipcMain.handle('settings:open', async () => {
   } catch (err) {
     return { error: err.message };
   }
+});
+
+// ---------------------------------------------------------------------------
+// YouTube and TikTok chat
+// ---------------------------------------------------------------------------
+
+// Twitch is read by the page itself. These two can't be, because neither
+// answers a web page (no CORS), so they run here and the page gets each
+// message, status change and deletion over IPC.
+const SOURCES = { youtube: YouTubeChat, tiktok: TikTokChat };
+const sources = {};
+
+function stopSources() {
+  for (const platform of Object.keys(sources)) stopSource(platform);
+}
+
+function stopSource(platform) {
+  const source = sources[platform];
+  if (!source) return;
+  delete sources[platform];
+  source.removeAllListeners();
+  source.stop();
+}
+
+ipcMain.handle('source:connect', (event, { platform, target } = {}) => {
+  if (!Object.hasOwn(SOURCES, platform)) return false;
+  stopSource(platform);
+  const source = new SOURCES[platform]();
+  const page = event.sender;
+  source.on('event', (payload) => {
+    if (sources[platform] === source && !page.isDestroyed()) page.send('source:event', { platform, ...payload });
+  });
+  sources[platform] = source;
+  source.start(String(target || ''));
+  return true;
+});
+
+ipcMain.handle('source:disconnect', (_event, { platform } = {}) => {
+  stopSource(platform);
+  return true;
 });
 
 ipcMain.on('window:toggle', toggleWindow);
