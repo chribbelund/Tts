@@ -48,8 +48,12 @@ function normalizeLogin(name) {
 function speakableName(displayName, login, nicknames) {
   const nickname = nicknames && (nicknames[normalizeLogin(login)] || nicknames[normalizeLogin(displayName)]);
   if (nickname) return nickname;
-  const name = displayName && /^[\x20-\x7E]+$/.test(displayName) ? displayName : (login || displayName || 'someone');
-  return name.replace(/_+/g, ' ').trim() || login || 'someone';
+  // YouTube and TikTok logins carry a "yt:" or "tt:" prefix that isn't said.
+  // A YouTube channel id ("UC…") is no name at all, so it's never read.
+  let spoken = (login || '').replace(/^(?:yt|tt):/, '');
+  if (/^uc[\w-]{22}$/i.test(spoken)) spoken = '';
+  const name = displayName && /^[\x20-\x7E]+$/.test(displayName) ? displayName : (spoken || displayName || 'someone');
+  return name.replace(/_+/g, ' ').trim() || spoken || 'someone';
 }
 
 function stripLeadingMention(text, login, displayName) {
@@ -140,6 +144,12 @@ function composeSpeech(entry, prev, settings) {
     return body ? `${lead}: ${body}` : lead;
   }
 
+  // A YouTube Super Chat or Super Sticker, said like a cheer.
+  if (entry.paid) {
+    const lead = `${name} sent a ${entry.paid.label}`;
+    return body ? `${lead}: ${body}` : lead;
+  }
+
   if (!body) return '';
 
   if (entry.action) return `${name} ${body}`;
@@ -157,6 +167,7 @@ function composeSpeech(entry, prev, settings) {
   }
 
   const sameSpeaker = settings.collapseNames && prev && prev.login === entry.login &&
+    prev.sourceId === entry.sourceId &&
     prev.kind === 'chat' && entry.receivedAt - prev.receivedAt < 30000;
 
   if (settings.nameFormat === 'none' || sameSpeaker) return body;

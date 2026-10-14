@@ -4,6 +4,8 @@ const { app, BrowserWindow, Menu, Notification, Tray, dialog, globalShortcut, ip
 const fs = require('node:fs');
 const path = require('node:path');
 const { toAccelerator, isMediaKey } = require('./accelerator');
+const { YouTubeChat } = require('./sources/youtube');
+const { TikTokChat } = require('./sources/tiktok');
 
 // Chromium won't play audio until the page has been clicked. A reader that is
 // started or resumed by a hotkey has no click to wait for, so allow it up front.
@@ -29,7 +31,7 @@ let win = null;
 let tray = null;
 let quitting = false;
 let toldAboutTray = false;
-let readerState = { paused: false, channel: '', waiting: 0, replay: true };
+let readerState = { paused: false, channel: '', where: '', waiting: 0, replay: true };
 
 // ---------------------------------------------------------------------------
 // Window
@@ -79,7 +81,14 @@ function createWindow() {
     confirmClose();
   });
 
-  win.on('closed', () => { win = null; });
+  // A reload or a crashed page starts over with nothing connected, so the
+  // chats it had open here would keep feeding a page that forgot them.
+  win.webContents.on('did-start-navigation', ({ isMainFrame, isSameDocument }) => {
+    if (isMainFrame && !isSameDocument) stopSources();
+  });
+  win.webContents.on('render-process-gone', stopSources);
+
+  win.on('closed', () => { win = null; stopSources(); });
 }
 
 let askingToClose = false;
@@ -246,7 +255,7 @@ function buildTray() {
 
 function renderTray() {
   if (!tray) return;
-  const where = readerState.channel ? `#${readerState.channel}` : 'Not connected';
+  const where = readerState.where || (readerState.channel ? `#${readerState.channel}` : 'Not connected');
   const waiting = readerState.waiting ? ` (${readerState.waiting} waiting)` : '';
   tray.setToolTip(`Chat Reader — ${where}${waiting}`);
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -318,7 +327,7 @@ if (!app.requestSingleInstanceLock()) {
   // you're looking at something else.
   app.on('window-all-closed', () => {});
   app.on('before-quit', () => { quitting = true; });
-  app.on('will-quit', () => globalShortcut.unregisterAll());
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); stopSources(); });
 }
 
 ipcMain.handle('hotkeys:apply', (_event, payload) => {
@@ -370,6 +379,53 @@ ipcMain.handle('settings:open', async () => {
   } catch (err) {
     return { error: err.message };
   }
+});
+
+// ---------------------------------------------------------------------------
+// YouTube and TikTok chat
+// ---------------------------------------------------------------------------
+
+// Twitch is read by the page itself. These two can't be, because neither
+// answers a web page (no CORS), so they run here and the page gets each
+// message, status change and deletion over IPC. Several can run at once,
+// on the same platform too; the page names each one with an id.
+const SOURCES = { youtube: YouTubeChat, tiktok: TikTokChat };
+const MAX_SOURCES = 24;
+const sources = new Map();
+
+function stopSources() {
+  for (const id of [...sources.keys()]) stopSource(id);
+}
+
+function stopSource(id) {
+  const source = sources.get(id);
+  if (!source) return;
+  sources.delete(id);
+  source.removeAllListeners();
+  source.stop();
+}
+
+ipcMain.handle('source:connect', (event, { id, platform, target } = {}) => {
+  id = String(id || '');
+  if (!/^[\w-]{1,40}$/.test(id) || !Object.hasOwn(SOURCES, platform)) return false;
+  stopSource(id);
+  if (sources.size >= MAX_SOURCES) return false;
+  const source = new SOURCES[platform]();
+  const page = event.sender;
+  source.on('event', (payload) => {
+    if (sources.get(id) !== source || page.isDestroyed()) return;
+    // A message goes inside its own field, so nothing in it can pose as the id.
+    const { type, ...rest } = payload;
+    page.send('source:event', type === 'message' ? { id, type, message: rest } : { ...rest, id, type });
+  });
+  sources.set(id, source);
+  source.start(String(target || ''));
+  return true;
+});
+
+ipcMain.handle('source:disconnect', (_event, { id } = {}) => {
+  stopSource(String(id || ''));
+  return true;
 });
 
 ipcMain.on('window:toggle', toggleWindow);

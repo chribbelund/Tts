@@ -152,16 +152,129 @@ kbd {
 }
 .brand { margin: 0; font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 8px; letter-spacing: -.01em; }
 .brand-mark { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); }
-.connect { display: flex; gap: 8px; flex: 1; min-width: 260px; max-width: 520px; }
-.connect input {
+.connect { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 260px; max-width: 520px; }
+/* Room for YouTube and TikTok next to Twitch; they wrap onto a second row
+   when the window is narrow. */
+/* With more than one chat the fields get a row of their own, under the
+   brand, presets and status, and sit side by side in it. */
+.connect:has(.source-field + .source-field) { order: 10; flex: 1 1 100%; max-width: none; }
+
+/* ---------- presets ---------- */
+.presets { position: relative; }
+.presets-btn { display: flex; align-items: center; gap: 6px; max-width: 220px; }
+.presets-btn svg { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+#presetsLabel { overflow: hidden; text-overflow: ellipsis; }
+.presets-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.presets-panel { width: min(360px, calc(100vw / var(--ui-zoom) - 24px)); padding: 8px; }
+.preset-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 50vh; overflow-y: auto; }
+.preset-list li { display: flex; align-items: center; gap: 4px; }
+.preset-pick {
   flex: 1;
   min-width: 0;
-  padding: 8px 12px;
+  display: grid;
+  gap: 1px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.preset-pick:hover, .preset-pick:focus-visible { background: var(--panel-2); }
+.preset-pick[aria-current="true"] { background: var(--accent-soft); }
+.preset-pick[aria-current="true"] .preset-name::after { content: " · open"; color: var(--accent); font-weight: 500; }
+.preset-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-what { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presets-panel > .hint { margin: 6px 6px 8px; }
+.preset-save { border-top: 1px solid var(--line); margin-top: 6px; padding: 10px 6px 2px; }
+.preset-save-row { display: flex; gap: 6px; margin-top: 6px; }
+.preset-save-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--panel-2);
 }
-.connect input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.preset-save .hint { margin: 6px 0 0; }
+.preset-save .hint:empty { display: none; }
+.source-field {
+  flex: 1 1 200px;
+  min-width: 0;
+  max-width: 360px;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.source-field:focus-within { outline: 2px solid var(--accent); outline-offset: -1px; }
+.source-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.source-field .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line); flex: none; }
+.source-field[data-state="connected"] .dot { background: var(--ok); }
+.source-field[data-state="connecting"] .dot { background: var(--warn); animation: blink 1s infinite; }
+.source-field[data-state="error"] .dot { background: var(--bad); }
+.source-field[data-state="error"] { border-color: var(--bad); }
+.connect input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px 8px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+.connect input:focus-visible { outline: none; }
+/* The × that takes YouTube or TikTok away again. */
+.source-remove { margin-right: 4px; }
+.source-add { position: relative; display: flex; }
+.add-btn { display: grid; place-items: center; padding: 0 10px; }
+.add-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.add-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.chat-fields { display: contents; }
+.popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow), 0 8px 24px rgba(0, 0, 0, .18);
+}
+.popover[hidden] { display: none; }
+.source-menu { min-width: 150px; }
+.source-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.source-menu button[hidden] { display: none; }
+.menu-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.menu-dot[data-platform="twitch"] { background: #9146ff; }
+.menu-dot[data-platform="youtube"] { background: #e0262d; }
+.menu-dot[data-platform="tiktok"] { background: #0e9f99; }
+.source-menu button:hover, .source-menu button:focus-visible { background: var(--panel-2); outline: none; }
+.status { min-width: 0; }
+#statusText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
 .status { display: flex; align-items: center; gap: 8px; color: var(--muted); margin-left: auto; }
 .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .status[data-state="connected"] .dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
@@ -337,6 +450,24 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .x:hover { color: var(--bad); }
 .msg:not([data-status="queued"]) .x { visibility: hidden; }
 .msg.event .text, .msg.notice .text { font-style: italic; }
+/* Which chat a message came from, shown once there's more than one. */
+.platform {
+  --p: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--p) 45%, var(--line));
+  color: color-mix(in oklab, var(--p) 78%, var(--fg));
+  white-space: nowrap;
+}
+.platform[data-platform="twitch"] { --p: #9146ff; }
+.platform[data-platform="youtube"] { --p: #e0262d; }
+.platform[data-platform="tiktok"] { --p: #0e9f99; }
+:root[data-contrast="high"] .platform { color: var(--fg); border-color: var(--fg); }
+.now-msg .platform { vertical-align: 1px; }
 .msg .badge {
   font-size: 11px;
   padding: 0 7px;
@@ -604,6 +735,8 @@ textarea { resize: vertical; }
 body.is-desktop .desktop-only:not([hidden]) { display: flex; }
 body.is-desktop p.desktop-only:not([hidden]) { display: block; }
 body.is-desktop .browser-only { display: none; }
+.desktop-only-inline { display: none; }
+body.is-desktop .desktop-only-inline { display: inline; }
 
 .keybind .hotkey-note {
   flex-basis: 100%;
