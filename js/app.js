@@ -8,9 +8,10 @@ const STORAGE_KEY = 'twitch-chat-reader:v1';
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 const DEFAULTS = {
-  channel: '',
-  youtube: '',           // what was typed in the YouTube field (desktop app only)
-  tiktok: '',            // the TikTok username (desktop app only)
+  // The chats in the top bar, as typed: [{ platform: 'twitch' | 'youtube' | 'tiktok', input }].
+  sources: [],
+  // Saved lists of chats: [{ name, sources: [...] }].
+  presets: [],
   // How the page looks. Kept with everything else so a backup carries it over.
   theme: 'auto',         // auto | light | dark
   uiScale: 100,          // percent; zooms the whole interface
@@ -85,6 +86,9 @@ function loadSettings() {
       userVoices: { kokoro: {}, system: {}, ...(saved.userVoices || {}) },
       nicknames: { ...(saved.nicknames || {}) },
       rewards: { ...(saved.rewards || {}) },
+      // Before several chats could be read there was one Twitch channel.
+      sources: Array.isArray(saved.sources) ? saved.sources : saved.channel ? [{ platform: 'twitch', input: saved.channel }] : [],
+      presets: Array.isArray(saved.presets) ? saved.presets : [],
     };
   } catch {
     return cloneDefaults();
@@ -92,6 +96,8 @@ function loadSettings() {
 }
 
 const settings = loadSettings();
+// Single-chat settings from before the list of chats; loadSettings() moved them.
+for (const old of ['channel', 'youtube', 'tiktok']) delete settings[old];
 let saveTimer = null;
 function saveSettings() {
   clearTimeout(saveTimer);
@@ -500,42 +506,54 @@ function restartCurrent() {
 // Twitch → entries
 // ---------------------------------------------------------------------------
 
-// Emote names in the 7TV/BTTV/FFZ sets, loaded once we know the channel id.
-const thirdPartyEmotes = new ThirdPartyEmotes(() => {
+// Emote names in the 7TV/BTTV/FFZ sets. Each Twitch chat in the top bar has
+// its own (chat.emotes), loaded once Twitch has told us the channel's id.
+function emotesChanged() {
   renderEmoteStatus();
   // Messages that queued up while the sets were still downloading.
   refreshSpeechBodies();
   renderNow();
-});
+}
 
-let currentRoomId = null;
-
-function loadThirdPartyEmotes(roomId) {
-  if (roomId && roomId !== currentRoomId) {
-    currentRoomId = roomId;
-    thirdPartyEmotes.clear();
+// `chat` and `roomId` when a Twitch chat has just learned its channel id;
+// with neither, after the emote setting changes.
+function loadThirdPartyEmotes(chat, roomId) {
+  if (chat && roomId && roomId !== chat.roomId) {
+    chat.roomId = roomId;
+    chat.emotes.clear();
   }
-  if (settings.emoteMode === 'skip-all' && currentRoomId) thirdPartyEmotes.load(currentRoomId);
+  if (settings.emoteMode === 'skip-all') {
+    for (const c of chats) if (c.emotes && c.roomId) c.emotes.load(c.roomId);
+  }
   renderEmoteStatus();
+}
+
+// The emote set that applies to an entry: its Twitch channel's. YouTube and
+// TikTok mark their own emotes, and 7TV names mean nothing there.
+function emotesFor(entry) {
+  const chat = entry && chats.find((c) => c.id === entry.sourceId);
+  return chat && chat.emotes ? chat.emotes : null;
 }
 
 function renderEmoteStatus() {
   const hint = $('#emoteHint');
+  const sets = chats.filter((c) => c.emotes && c.roomId).map((c) => c.emotes);
   // In "read" mode every emote is spoken anyway, so the option is moot.
   $('#readEmoteOnlyRow').hidden = settings.emoteMode === 'read';
   if (settings.emoteMode === 'read') {
     hint.textContent = 'Emote names are spoken as written, e.g. “Kappa”.';
   } else if (settings.emoteMode === 'skip-twitch') {
     hint.textContent = '7TV, BetterTTV and FrankerFaceZ emotes are still read out, because Twitch doesn’t mark them in the message.';
-  } else if (!currentRoomId) {
+  } else if (!sets.length) {
     hint.textContent = 'The channel’s 7TV, BetterTTV and FrankerFaceZ emote names are fetched when you connect.';
-  } else if (!thirdPartyEmotes.loaded) {
+  } else if (sets.some((e) => !e.loaded)) {
     hint.textContent = 'Fetching 7TV, BetterTTV and FrankerFaceZ emote names…';
-  } else if (!thirdPartyEmotes.size) {
+  } else if (!sets.some((e) => e.size)) {
     hint.textContent = 'Couldn’t reach 7TV, BetterTTV or FrankerFaceZ, so only Twitch’s own emotes are skipped.';
   } else {
-    const count = thirdPartyEmotes.size.toLocaleString();
-    hint.textContent = `Also skipping ${count} 7TV/BTTV/FFZ emote names${thirdPartyEmotes.failed ? ', though one source didn’t answer' : ''}.`;
+    const count = new Set(sets.flatMap((e) => [...e.names])).size.toLocaleString();
+    const where = sets.length > 1 ? ` across ${sets.length} channels` : '';
+    hint.textContent = `Also skipping ${count} 7TV/BTTV/FFZ emote names${where}${sets.some((e) => e.failed) ? ', though one source didn’t answer' : ''}.`;
   }
 }
 
@@ -545,12 +563,12 @@ function renderEmoteStatus() {
  * they can only be recognised by name. `reply` is the chatter being replied
  * to, whose @mention Twitch puts in front of the message.
  */
-function speechBodyFor(rawText, emotesTag, reply) {
+function speechBodyFor(rawText, emotesTag, reply, emotes) {
   const withoutMention = (t) => (reply ? stripLeadingMention(t, reply.login, reply.displayName) : t);
   if (settings.emoteMode === 'read') return withoutMention(rawText);
 
   let body = removeEmotes(rawText, emotesTag);
-  if (settings.emoteMode === 'skip-all') body = thirdPartyEmotes.strip(body);
+  if (settings.emoteMode === 'skip-all' && emotes) body = emotes.strip(body);
   body = withoutMention(body);
 
   // Taking the emotes out left nothing to say, so the message was only emotes.
@@ -573,7 +591,7 @@ function refreshSpeechBodies() {
 // What a chat entry says once the cheermotes and a chosen effect word are out.
 function entrySpeechBody(entry) {
   const reply = entry.isReply ? { login: entry.parentLogin, displayName: entry.parentDisplayName } : null;
-  let body = speechBodyFor(entry.rawText, entry.emotesTag, reply);
+  let body = speechBodyFor(entry.rawText, entry.emotesTag, reply, emotesFor(entry));
   if (entry.bits) body = stripCheermotes(body);
   if (entry.effectWord) body = body.replace(EFFECT_WORD_RE, '');
   return body;
@@ -629,7 +647,6 @@ function entryFromUserNotice(msg) {
     rawText: text,
     emotesTag: tags.emotes,
     displayText: text,
-    speechBody: speechBodyFor(text, tags.emotes),
   };
   if (tags['msg-id'] === 'announcement') return { ...base, kind: 'announcement' };
   return { ...base, kind: 'event', systemText: tags['system-msg'] || '' };
@@ -643,8 +660,9 @@ function entryFromUserNotice(msg) {
 // cheers, rewards that ask the viewer to type something, and messages. It
 // can't answer in chat either, so the reader says the result out loud.
 
-function handlePrivmsg(msg) {
-  const entry = entryFromPrivmsg(msg);
+// `chat` is the top-bar chat it came in on; the test button leaves it out.
+function handlePrivmsg(msg, chat) {
+  const entry = withSource(entryFromPrivmsg(msg), chat);
   if (entry.bits) applyCheer(entry);
   if (entry.rewardId) applyReward(entry);
   if (entry.highlighted && settings.highlightPriority) entry.priority = true;
@@ -837,8 +855,9 @@ function startRewardLink() {
   }
   rewardLink.action = $('#rewardAction').value;
   $('#rewardLinkBtn').textContent = 'Stop waiting';
-  $('#rewardStatus').textContent = chat.connected
-    ? `Waiting… Redeem the reward on #${chat.channel} now.`
+  const twitch = chats.find((c) => c.platform === 'twitch' && c.state === 'connected');
+  $('#rewardStatus').textContent = twitch
+    ? `Waiting… Redeem the reward on #${twitch.client.channel} now.`
     : 'Waiting… Connect to your channel, then redeem the reward.';
 }
 
@@ -920,12 +939,85 @@ for (const key of ['voiceCommandWho', 'modCommandWho']) {
   $(`#${key}`).addEventListener('change', (e) => { settings[key] = e.target.value; saveSettings(); });
 }
 
-// What a mod took out of chat comes out of the queue too, whichever chat it
-// was in. Ids and user ids from YouTube and TikTok carry their prefix, so
-// they can't match anything from another platform.
-function removeChatterMessages(userId, platform = 'twitch') {
+// ---------------------------------------------------------------------------
+// Chats: every Twitch channel, YouTube stream and TikTok live being read
+// ---------------------------------------------------------------------------
+
+// Each field in the top bar is one chat, and any number of each platform
+// can be read at once, all into the same queue. Twitch is read by the page
+// itself (one IRC connection per channel); YouTube and TikTok only by the
+// desktop app, see js/sources.js.
+const MAX_CHATS = 12;
+const chats = [];
+let chatSeq = 0;
+
+const NORMALIZE = { twitch: TwitchChat.normalizeChannel, youtube: normalizeYouTube, tiktok: normalizeTikTok };
+const INVALID_TEXT = {
+  twitch: 'That doesn’t look like a Twitch channel',
+  youtube: 'That doesn’t look like a YouTube channel or video',
+  tiktok: 'That doesn’t look like a TikTok username',
+};
+const PLACEHOLDERS = { twitch: 'Channel or twitch.tv link', youtube: '@handle or video link', tiktok: '@username' };
+
+// YouTube and TikTok are only offered where they can work.
+const addablePlatforms = () => (RemoteChat.available ? ['twitch', 'youtube', 'tiktok'] : ['twitch']);
+
+function createChat(platform, input = '') {
+  const chat = { id: `c${++chatSeq}`, platform, input, state: 'idle', text: '', roomId: null };
+  if (platform === 'twitch') {
+    chat.emotes = new ThirdPartyEmotes(emotesChanged);
+    chat.client = new TwitchChat({
+      onStatus: (state, text) => renderConnection(chat, state, text),
+      onMessage: (msg) => handlePrivmsg(msg, chat),
+      onUserNotice: (msg) => {
+        const entry = withSource(entryFromUserNotice(msg), chat);
+        entry.speechBody = entrySpeechBody(entry);
+        enqueue(entry);
+      },
+      onRoomState: (roomId) => loadThirdPartyEmotes(chat, roomId),
+      onClearChat: (userId) => removeChatterMessages(chat, userId),
+      onDeleteMessage: removeMessage,
+    });
+  } else {
+    chat.client = new RemoteChat(chat.id, platform, {
+      onStatus: (state, text) => renderConnection(chat, state, text),
+      onMessage: (m) => handleRemoteMessage(chat, m),
+      onDeleteMessage: removeMessage,
+      onClearChat: (userId) => removeChatterMessages(chat, userId),
+    });
+  }
+  return chat;
+}
+
+// Connected, connecting, or waiting to retry or for the stream to start.
+const isActive = (chat) => (chat.platform === 'twitch' ? !chat.client.manualClose : chat.client.active);
+const activeChats = () => chats.filter(isActive);
+const anyChatConnected = () => chats.some((c) => c.state === 'connected');
+const chatLabel = (chat) => sourceLabel(chat.platform, chat.client.channel || NORMALIZE[chat.platform](chat.input));
+
+// "#shroud, @lofigirl and @someone": what is being read, for the status
+// line, the tray, the tab title and the media keys.
+function chatsSummary({ connectedOnly = false } = {}) {
+  const labels = activeChats().filter((c) => !connectedOnly || c.state === 'connected').map(chatLabel);
+  return labels.length > 1 ? `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}` : labels[0] || '';
+}
+
+// Which chat an entry came in on, so a mod clearing one channel leaves the
+// others alone and the feed can say where it was written.
+function withSource(entry, chat) {
+  if (chat) {
+    entry.sourceId = chat.id;
+    entry.sourceLabel = chatLabel(chat);
+  }
+  return entry;
+}
+
+// What a mod took out of chat comes out of the queue too. A user id only
+// counts in the chat it was banned from; no user id means that whole chat
+// was cleared.
+function removeChatterMessages(chat, userId) {
   const targets = [...reader.queue, reader.current]
-    .filter((e) => e && (userId ? e.userId === userId : (e.platform || 'twitch') === platform));
+    .filter((e) => e && e.sourceId === chat.id && (!userId || e.userId === userId));
   for (const entry of targets) removeFromQueue(entry, 'deleted', userId ? 'removed by mod' : 'chat cleared');
 }
 
@@ -937,15 +1029,6 @@ function removeMessage(id) {
     if (shown && shown.status !== 'done' && shown.status !== 'speaking') setStatus(shown, 'deleted', 'deleted by mod');
   }
 }
-
-const chat = new TwitchChat({
-  onStatus: (state, text) => renderConnection('twitch', state, text),
-  onMessage: handlePrivmsg,
-  onUserNotice: (msg) => enqueue(entryFromUserNotice(msg)),
-  onRoomState: (roomId) => loadThirdPartyEmotes(roomId),
-  onClearChat: (userId) => removeChatterMessages(userId),
-  onDeleteMessage: removeMessage,
-});
 
 // ---------------------------------------------------------------------------
 // YouTube and TikTok → entries (desktop app only, see js/sources.js)
@@ -976,53 +1059,11 @@ function entryFromRemote(platform, m) {
 
 // The same path as a Twitch message, minus bits and channel points: mods
 // and the streamer can use the reader's chat commands from any platform.
-function handleRemoteMessage(platform, m) {
-  const entry = entryFromRemote(platform, m);
+function handleRemoteMessage(chat, m) {
+  const entry = withSource(entryFromRemote(chat ? chat.platform : m.platform, m), chat);
   if (entry.kind === 'chat' && !entry.paid) runChatCommand(entry);
   entry.speechBody = entrySpeechBody(entry);
   enqueue(entry);
-}
-
-const remoteHandlers = (platform) => ({
-  onStatus: (state, text) => renderConnection(platform, state, text),
-  onMessage: (m) => handleRemoteMessage(platform, m),
-  onDeleteMessage: removeMessage,
-  onClearChat: (userId) => removeChatterMessages(userId, platform),
-});
-
-const sources = {
-  twitch: chat,
-  youtube: new RemoteChat('youtube', remoteHandlers('youtube')),
-  tiktok: new RemoteChat('tiktok', remoteHandlers('tiktok')),
-};
-
-const SOURCE_INPUTS = { twitch: '#channelInput', youtube: '#youtubeInput', tiktok: '#tiktokInput' };
-const SOURCE_NORMALIZE = { twitch: TwitchChat.normalizeChannel, youtube: normalizeYouTube, tiktok: normalizeTikTok };
-const SOURCE_INVALID = {
-  twitch: 'That doesn’t look like a Twitch channel',
-  youtube: 'That doesn’t look like a YouTube channel or video',
-  tiktok: 'That doesn’t look like a TikTok username',
-};
-const sourceStatus = Object.fromEntries(Object.keys(sources).map((p) => [p, { state: 'idle', text: '' }]));
-
-// YouTube and TikTok are only offered where they can work.
-const usablePlatforms = () => (RemoteChat.available ? ['twitch', 'youtube', 'tiktok'] : ['twitch']);
-
-// Connected, connecting, or waiting to retry or for the stream to start.
-function sourceIsActive(platform) {
-  return platform === 'twitch' ? !chat.manualClose : sources[platform].active;
-}
-
-const activePlatforms = () => usablePlatforms().filter(sourceIsActive);
-const anySourceConnected = () => usablePlatforms().some((p) => sourceStatus[p].state === 'connected');
-
-// "#shroud, @lofigirl and @someone": what is being read, for the tray, the
-// tab title and the media keys.
-function sourcesSummary({ connectedOnly = false } = {}) {
-  const labels = activePlatforms()
-    .filter((p) => !connectedOnly || sourceStatus[p].state === 'connected')
-    .map((p) => sourceLabel(p, sources[p].channel));
-  return labels.length > 1 ? `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}` : labels[0] || '';
 }
 
 // ---------------------------------------------------------------------------
@@ -1040,12 +1081,17 @@ const STATUS_TEXT = {
   deleted: 'deleted',
 };
 
-// Which chat a message came from, once there is more than Twitch to tell
-// apart. Notices from the reader itself have no platform.
+// Which chat a message came from, once there is more than one Twitch chat to
+// tell apart: the platform, and the channel too when that platform has more
+// than one. Notices from the reader itself have no platform.
 function platformTag(entry) {
   const platform = entry.platform;
-  if (!platform || (platform === 'twitch' && activePlatforms().length < 2)) return null;
-  return el('span', { class: 'platform', 'data-platform': platform }, PLATFORMS[platform].name);
+  const active = activeChats();
+  if (!platform || (platform === 'twitch' && active.length < 2)) return null;
+  const name = PLATFORMS[platform].name;
+  const several = active.filter((c) => c.platform === platform).length > 1;
+  const text = several && entry.sourceLabel ? `${name} ${entry.sourceLabel}` : name;
+  return el('span', { class: 'platform', 'data-platform': platform, title: entry.sourceLabel ? `${name} ${entry.sourceLabel}` : name }, text);
 }
 
 function addToFeed(entry) {
@@ -1190,7 +1236,7 @@ function renderNow() {
   } else {
     msgEl.append(el('span', { class: 'muted' }, reader.paused
       ? `Reading is paused${waiting ? `, ${waiting} message${waiting === 1 ? '' : 's'} waiting` : ''}. Press ${keyLabel(settings.keys.pause)} to continue.`
-      : anySourceConnected() ? 'Waiting for chat messages…' : 'Nothing is being read right now.'));
+      : anyChatConnected() ? 'Waiting for chat messages…' : 'Nothing is being read right now.'));
   }
   if (!entry) {
     nowBar.style.width = '0';
@@ -1200,7 +1246,7 @@ function renderNow() {
 
   for (const e of feedEntries) e.node.classList.toggle('paused', e.status === 'speaking' && reader.paused);
 
-  if (desktop) desktop.setState({ paused: reader.paused, channel: chat.channel || '', where: sourcesSummary(), waiting });
+  if (desktop) desktop.setState({ paused: reader.paused, where: chatsSummary(), waiting });
 }
 
 function tickProgress() {
@@ -1219,11 +1265,13 @@ function tickProgress() {
 }
 requestAnimationFrame(tickProgress);
 
-function renderConnection(platform, state, text) {
-  sourceStatus[platform] = { state, text };
-  const field = $(SOURCE_INPUTS[platform]).closest('.source-field');
-  field.dataset.state = state;
-  field.title = text ? `${PLATFORMS[platform].name}: ${text}` : '';
+function renderConnection(chat, state, text) {
+  chat.state = state;
+  chat.text = text;
+  if (chat.field) {
+    chat.field.dataset.state = state;
+    chat.field.title = text ? `${PLATFORMS[chat.platform].name}: ${text}` : '';
+  }
   renderStatusLine();
   renderConnectButton();
   renderNow();
@@ -1232,26 +1280,27 @@ function renderConnection(platform, state, text) {
 // One line for every chat: the ones being read are named together, anything
 // else (connecting, waiting for a stream, an error) says which chat it is.
 function renderStatusLine() {
-  const platforms = usablePlatforms();
-  const shown = platforms.filter((p) => sourceIsActive(p) || sourceStatus[p].state === 'error');
-  const connected = shown.filter((p) => sourceStatus[p].state === 'connected');
-  const others = shown.filter((p) => sourceStatus[p].state !== 'connected');
+  const shown = chats.filter((c) => isActive(c) || c.state === 'error');
+  const connected = shown.filter((c) => c.state === 'connected');
+  const others = shown.filter((c) => c.state !== 'connected');
   const parts = [];
-  if (connected.length) parts.push(connected.length === 1 ? sourceStatus[connected[0]].text : `Reading ${sourcesSummary({ connectedOnly: true })}`);
-  const named = shown.length > 1;
-  for (const p of others) parts.push(named ? `${PLATFORMS[p].name}: ${sourceStatus[p].text}` : sourceStatus[p].text);
+  if (connected.length) parts.push(connected.length === 1 ? connected[0].text : `Reading ${chatsSummary({ connectedOnly: true })}`);
+  for (const c of others) {
+    // "TikTok: @x isn't live…" — most of these already name the chat.
+    const label = c.text.includes(chatLabel(c)) ? '' : ` ${chatLabel(c)}`;
+    parts.push(shown.length > 1 ? `${PLATFORMS[c.platform].name}${label}: ${c.text}` : c.text);
+  }
 
   // The dot shows the worst of them, so a chat that dropped isn't hidden
   // behind one that's fine.
-  const states = shown.map((p) => sourceStatus[p].state);
-  const state = ['error', 'connecting', 'connected'].find((s) => states.includes(s)) || 'idle';
-  const fallback = platforms.map((p) => sourceStatus[p].text).find(Boolean) || 'Not connected';
-  const text = parts.join(' · ') || fallback;
+  const states = shown.map((c) => c.state);
+  const state = ['error', 'connecting', 'connected'].find((x) => states.includes(x)) || 'idle';
+  const text = parts.join(' · ') || chats.map((c) => c.text).find(Boolean) || 'Not connected';
   $('#status').dataset.state = state;
   $('#statusText').textContent = text;
   $('#status').title = text;
 
-  const reading = sourcesSummary({ connectedOnly: true });
+  const reading = chatsSummary({ connectedOnly: true });
   document.title = reading ? `${reading} · Chat Reader` : 'Chat Reader · Twitch TTS';
 }
 
@@ -1796,7 +1845,7 @@ function updateMediaSession() {
   if (!settings.mediaKeys || !('mediaSession' in navigator)) return;
   if (typeof MediaMetadata === 'function') navigator.mediaSession.metadata = new MediaMetadata({
     title: reader.paused ? 'Chat reading paused' : 'Reading chat',
-    artist: sourcesSummary() || 'Chat Reader',
+    artist: chatsSummary() || 'Chat Reader',
   });
   navigator.mediaSession.playbackState = reader.paused ? 'paused' : 'playing';
 }
@@ -2021,8 +2070,13 @@ function acceptRewards(value) {
 
 const SETTING_CHECKS = {
   channel: (v) => (typeof v === 'string' ? (TwitchChat.normalizeChannel(v) || '') : undefined),
-  youtube: (v) => (typeof v === 'string' && v.length <= 300 ? (normalizeYouTube(v) ? v.trim() : '') : undefined),
-  tiktok: (v) => (typeof v === 'string' && v.length <= 300 ? (normalizeTikTok(v) ? v.trim() : '') : undefined),
+  sources: acceptChatList,
+  presets: (v) => (Array.isArray(v)
+    ? v.filter((p) => p && typeof p.name === 'string' && p.name.trim() && p.name.length <= 60)
+      .map((p) => ({ name: p.name.trim(), sources: acceptChatList(p.sources) || [] }))
+      .filter((p) => p.sources.length)
+      .slice(0, MAX_PRESETS)
+    : undefined),
   theme: accept.oneOf('auto', 'light', 'dark'),
   uiScale: (v) => {
     const n = accept.int(UI_SCALES[0], UI_SCALES[UI_SCALES.length - 1])(v);
@@ -2071,6 +2125,15 @@ const SETTING_CHECKS = {
   rewards: acceptRewards,
 };
 
+function acceptChatList(value) {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .filter((item) => item && typeof item === 'object' && Object.hasOwn(NORMALIZE, item.platform)
+      && typeof item.input === 'string' && item.input.length <= 300 && NORMALIZE[item.platform](item.input))
+    .slice(0, MAX_CHATS)
+    .map((item) => ({ platform: item.platform, input: item.input.trim() }));
+}
+
 function sanitizeSettings(raw) {
   const clean = {};
   let kept = 0;
@@ -2081,16 +2144,18 @@ function sanitizeSettings(raw) {
     clean[key] = value;
     kept++;
   }
+  // A file from before several chats could be read has one Twitch channel.
+  if ('channel' in clean) {
+    if (!clean.sources && clean.channel) clean.sources = [{ platform: 'twitch', input: clean.channel }];
+    delete clean.channel;
+  }
   return { clean, kept };
 }
 
 // Put the settings into the controls. The one place that knows how, so
 // starting up, importing a file and resetting all go through it.
 function syncControlsFromSettings() {
-  $('#channelInput').value = settings.channel;
-  $('#youtubeInput').value = settings.youtube;
-  $('#tiktokInput').value = settings.tiktok;
-  syncShownSources();
+  setChatList(settings.sources);
   $('#theme').value = settings.theme;
   $('#uiScale').value = String(settings.uiScale);
   $('#volume').value = settings.volume;
@@ -2146,17 +2211,128 @@ function userGesture() {
   if (settings.engine === 'kokoro' && kokoroEngine.state === 'unloaded') loadKokoro();
 }
 
+// ---------------------------------------------------------------------------
+// The chat fields in the top bar
+// ---------------------------------------------------------------------------
+
+// The list as it's saved and put into presets: what's typed, in order.
+const chatListOf = (list) => list.filter((c) => c.input.trim()).map((c) => ({ platform: c.platform, input: c.input.trim() }));
+
+function saveChatList() {
+  settings.sources = chatListOf(chats);
+  saveSettings();
+  renderPresets();
+}
+
+function chatField(chat) {
+  if (chat.field) return chat.field;
+  const name = PLATFORMS[chat.platform].name;
+  const inputId = `chat-${chat.id}`;
+  chat.inputEl = el('input', {
+    id: inputId,
+    placeholder: PLACEHOLDERS[chat.platform],
+    spellcheck: 'false',
+    oninput: (e) => {
+      chat.input = e.target.value;
+      saveChatList();
+      renderConnectButton();
+    },
+  });
+  chat.inputEl.value = chat.input;
+  chat.removeBtn = el('button', {
+    type: 'button',
+    class: 'x source-remove',
+    title: `Stop reading this ${name} chat`,
+    'aria-label': `Remove this ${name} chat`,
+    onclick: () => removeChat(chat),
+  }, '×');
+  chat.field = el('div', { class: 'source-field', 'data-platform': chat.platform, 'data-state': chat.state },
+    el('label', { class: 'source-tag', for: inputId }, el('span', { class: 'dot', 'aria-hidden': 'true' }), name),
+    chat.inputEl,
+    chat.removeBtn,
+  );
+  return chat.field;
+}
+
+function renderChatFields() {
+  $('#chatFields').replaceChildren(...chats.map(chatField));
+  // The last field can't go: there's always somewhere to type a channel.
+  for (const chat of chats) chat.removeBtn.hidden = chats.length < 2;
+  $('#sourceAdd').hidden = chats.length >= MAX_CHATS;
+  for (const item of $$('[data-add]')) item.hidden = !addablePlatforms().includes(item.dataset.add);
+  renderConnectButton();
+  renderStatusLine();
+}
+
+// Swap the whole list for another (a preset, a loaded backup). A chat that is
+// in both keeps running instead of reconnecting; the rest are stopped.
+function setChatList(list, { connect = false } = {}) {
+  const sameTarget = (chat, item) => chat.platform === item.platform
+    && (NORMALIZE[item.platform](chat.input) || chat.input.trim()) === (NORMALIZE[item.platform](item.input) || item.input.trim());
+  const pool = [...chats];
+  const next = [];
+  for (const item of list.slice(0, MAX_CHATS)) {
+    if (!NORMALIZE[item.platform]) continue;
+    const i = pool.findIndex((chat) => sameTarget(chat, item));
+    const chat = i === -1 ? createChat(item.platform, item.input) : pool.splice(i, 1)[0];
+    chat.input = item.input;
+    if (chat.inputEl) chat.inputEl.value = item.input;
+    next.push(chat);
+  }
+  for (const chat of pool) dropChat(chat);
+  if (!next.length) next.push(createChat('twitch'));
+  chats.splice(0, chats.length, ...next);
+  saveChatList();
+  renderChatFields();
+  renderNow();
+  if (connect) connectChats({ toggle: false });
+}
+
+function dropChat(chat) {
+  if (isActive(chat)) chat.client.disconnect(true);
+  if (chat.client.dispose) chat.client.dispose();
+}
+
+function addChat(platform) {
+  closeAddMenu();
+  const chat = createChat(platform);
+  chats.push(chat);
+  renderChatFields();
+  chat.inputEl.focus();
+}
+
+function removeChat(chat) {
+  const i = chats.indexOf(chat);
+  if (i === -1 || chats.length < 2) return;
+  dropChat(chat);
+  chats.splice(i, 1);
+  saveChatList();
+  renderChatFields();
+  renderNow();
+  (chats[i] || chats[i - 1]).inputEl.focus();
+}
+
 // What pressing Connect would do to each chat: start one whose field was
 // filled in or changed, stop one whose field was emptied.
-function pendingSourceChanges() {
+function pendingChanges() {
+  const seen = new Set();
   const changes = [];
-  for (const platform of usablePlatforms()) {
-    const raw = $(SOURCE_INPUTS[platform]).value.trim();
-    const target = raw ? SOURCE_NORMALIZE[platform](raw) : null;
-    const active = sourceIsActive(platform);
-    if (raw && !target) changes.push({ platform, invalid: true });
-    else if (target && (!active || sources[platform].channel !== target)) changes.push({ platform, target, raw });
-    else if (!target && active) changes.push({ platform, stop: true });
+  for (const chat of chats) {
+    const raw = chat.input.trim();
+    const target = raw ? NORMALIZE[chat.platform](raw) : null;
+    if (raw && !target) {
+      changes.push({ chat, invalid: INVALID_TEXT[chat.platform] });
+      continue;
+    }
+    const key = `${chat.platform}:${(target || '').toLowerCase()}`;
+    if (target && seen.has(key)) {
+      changes.push({ chat, invalid: 'That one is already in the list' });
+      continue;
+    }
+    if (target) seen.add(key);
+    const active = isActive(chat);
+    if (target && (!active || chat.client.channel !== target)) changes.push({ chat, target });
+    else if (!target && active) changes.push({ chat, stop: true });
   }
   return changes;
 }
@@ -2164,132 +2340,208 @@ function pendingSourceChanges() {
 // "Disconnect" only when everything typed is already being read; after an
 // edit the same button applies it instead.
 function renderConnectButton() {
-  const disconnect = activePlatforms().length > 0 && pendingSourceChanges().length === 0;
+  const disconnect = activeChats().length > 0 && pendingChanges().length === 0;
   $('#connectBtn').textContent = disconnect ? 'Disconnect' : 'Connect';
   $('#connectBtn').classList.toggle('primary', !disconnect);
 }
 
-function connectSource(platform, target, raw) {
-  if (platform === 'twitch') {
-    settings.channel = target;
-    $('#channelInput').value = target;
-    const url = new URL(location.href);
-    url.searchParams.set('channel', target);
-    history.replaceState(null, '', url);
-  } else {
-    // Kept as typed, so a pasted link stays readable in the field.
-    settings[platform] = raw;
-  }
-  saveSettings();
-  sources[platform].connect(target);
-}
-
-function disconnectSource(platform) {
-  if (platform !== 'twitch') {
-    settings[platform] = '';
-    saveSettings();
-  }
-  sources[platform].disconnect();
-}
-
-function connectSources() {
-  const changes = pendingSourceChanges();
+// `toggle`: with nothing to change, disconnect everything (the button).
+// Switching to a preset only ever connects.
+function connectChats({ toggle = true } = {}) {
+  const changes = pendingChanges();
   const invalid = changes.find((c) => c.invalid);
   if (invalid) {
-    renderConnection(invalid.platform, 'error', SOURCE_INVALID[invalid.platform]);
-    $(SOURCE_INPUTS[invalid.platform]).focus();
+    renderConnection(invalid.chat, 'error', invalid.invalid);
+    invalid.chat.inputEl.focus();
     return;
   }
   // An emptied field also takes back the error it showed.
-  for (const platform of usablePlatforms()) {
-    if (!$(SOURCE_INPUTS[platform]).value.trim() && sourceStatus[platform].state === 'error') renderConnection(platform, 'idle', '');
-  }
+  for (const chat of chats) if (!chat.input.trim() && chat.state === 'error') renderConnection(chat, 'idle', '');
   if (!changes.length) {
-    const active = activePlatforms();
-    if (active.length) for (const platform of active) disconnectSource(platform);
-    else renderConnection('twitch', 'error', usablePlatforms().length > 1 ? 'Enter a channel to read' : SOURCE_INVALID.twitch);
+    const active = activeChats();
+    if (!toggle) return;
+    if (active.length) for (const chat of active) chat.client.disconnect();
+    else renderConnection(chats[0], 'error', 'Enter a channel to read');
     return;
   }
   userGesture();
   for (const change of changes) {
-    if (change.stop) disconnectSource(change.platform);
-    else connectSource(change.platform, change.target, change.raw);
+    if (change.stop) {
+      change.chat.client.disconnect();
+      continue;
+    }
+    if (change.chat.platform === 'twitch') {
+      change.chat.input = change.target;
+      change.chat.inputEl.value = change.target;
+    }
+    change.chat.client.connect(change.target);
   }
+  saveChatList();
+  updateChannelParam();
+}
+
+// ?channel= in the address is the first Twitch channel, so a bookmark or a
+// shared link opens it.
+function updateChannelParam() {
+  const twitch = chats.find((c) => c.platform === 'twitch' && c.client.channel);
+  const url = new URL(location.href);
+  if (twitch) url.searchParams.set('channel', twitch.client.channel);
+  else url.searchParams.delete('channel');
+  history.replaceState(null, '', url);
 }
 
 $('#connectForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  connectSources();
+  connectChats();
 });
-for (const selector of Object.values(SOURCE_INPUTS)) $(selector).addEventListener('input', renderConnectButton);
 
-// Twitch's field is always there. YouTube and TikTok come in through the +
-// button, and stay as long as they hold something or are being read.
-const ADDABLE = ['youtube', 'tiktok'];
-const shownSources = new Set();
-
-function renderSourceFields() {
-  for (const platform of ADDABLE) $(SOURCE_INPUTS[platform]).closest('.source-field').hidden = !shownSources.has(platform);
-  const left = RemoteChat.available ? ADDABLE.filter((p) => !shownSources.has(p)) : [];
-  $('#sourceAdd').hidden = !left.length;
-  for (const item of $$('[data-add]')) item.hidden = !left.includes(item.dataset.add);
-  if (!left.length) closeSourceMenu();
-}
-
-// After loading settings: show whichever fields have something in them.
-function syncShownSources() {
-  shownSources.clear();
-  for (const platform of ADDABLE) if (settings[platform] || sourceIsActive(platform)) shownSources.add(platform);
-  renderSourceFields();
-}
-
-function addSource(platform) {
-  closeSourceMenu();
-  shownSources.add(platform);
-  renderSourceFields();
-  $(SOURCE_INPUTS[platform]).focus();
-  renderConnectButton();
-}
-
-function removeSource(platform) {
-  $(SOURCE_INPUTS[platform]).value = '';
-  shownSources.delete(platform);
-  if (sourceIsActive(platform)) disconnectSource(platform);
-  else if (settings[platform]) { settings[platform] = ''; saveSettings(); }
-  renderConnection(platform, 'idle', '');
-  renderSourceFields();
-  $('#sourceAdd').hidden ? $('#channelInput').focus() : $('#sourceAddBtn').focus();
-}
-
-function openSourceMenu() {
-  const left = ADDABLE.filter((p) => !shownSources.has(p));
-  // With only one left there's nothing to choose between.
-  if (left.length === 1) { addSource(left[0]); return; }
+// The + button: another Twitch channel, a YouTube stream or a TikTok live.
+// In a browser, where only Twitch is possible, it adds a Twitch field.
+function openAddMenu() {
+  const platforms = addablePlatforms();
+  if (platforms.length === 1) { addChat(platforms[0]); return; }
   $('#sourceAddMenu').hidden = false;
   $('#sourceAddBtn').setAttribute('aria-expanded', 'true');
   $('#sourceAddMenu [data-add]:not([hidden])').focus();
 }
 
-function closeSourceMenu({ focus = false } = {}) {
+function closeAddMenu({ focus = false } = {}) {
   if ($('#sourceAddMenu').hidden) return;
   $('#sourceAddMenu').hidden = true;
   $('#sourceAddBtn').setAttribute('aria-expanded', 'false');
   if (focus) $('#sourceAddBtn').focus();
 }
 
-$('#sourceAddBtn').addEventListener('click', () => ($('#sourceAddMenu').hidden ? openSourceMenu() : closeSourceMenu()));
-for (const item of $$('[data-add]')) item.addEventListener('click', () => addSource(item.dataset.add));
-for (const button of $$('[data-remove]')) button.addEventListener('click', () => removeSource(button.dataset.remove));
-$('#sourceAddMenu').addEventListener('keydown', (e) => {
-  const items = $$('#sourceAddMenu [data-add]:not([hidden])');
-  const i = items.indexOf(document.activeElement);
-  if (e.key === 'Escape') { e.preventDefault(); closeSourceMenu({ focus: true }); return; }
-  const next = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: items.length - 1 }[e.key];
-  if (next === undefined) return;
-  e.preventDefault();
-  items[(next + items.length) % items.length].focus();
+// Arrow keys between the items of a small menu, Esc to close it.
+function menuKeys(menu, close) {
+  menu.addEventListener('keydown', (e) => {
+    const items = [...menu.querySelectorAll('[role="menuitem"]:not([hidden])')];
+    const i = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.preventDefault(); close({ focus: true }); return; }
+    const next = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: items.length - 1 }[e.key];
+    if (next === undefined || !items.length) return;
+    e.preventDefault();
+    items[(next + items.length) % items.length].focus();
+  });
+}
+
+$('#sourceAddBtn').addEventListener('click', () => ($('#sourceAddMenu').hidden ? openAddMenu() : closeAddMenu()));
+for (const item of $$('[data-add]')) item.addEventListener('click', () => addChat(item.dataset.add));
+menuKeys($('#sourceAddMenu'), closeAddMenu);
+
+// ---------------------------------------------------------------------------
+// Presets: saved lists of chats, to switch streamers in one click
+// ---------------------------------------------------------------------------
+
+const MAX_PRESETS = 50;
+const targetKey = (item) => `${item.platform}:${(NORMALIZE[item.platform](item.input) || item.input).toLowerCase()}`;
+const sameChats = (a, b) => a.length === b.length && a.every((item, i) => targetKey(item) === targetKey(b[i]));
+const currentPreset = () => {
+  const now = chatListOf(chats);
+  return now.length ? settings.presets.find((p) => sameChats(p.sources, now)) : null;
+};
+
+// "Twitch #shroud · YouTube @shroud".
+const describeChats = (list) => list
+  .map((item) => `${PLATFORMS[item.platform].name} ${sourceLabel(item.platform, NORMALIZE[item.platform](item.input) || item.input)}`)
+  .join(' · ');
+
+function renderPresets() {
+  const current = currentPreset();
+  $('#presetsLabel').textContent = current ? current.name : 'Presets';
+  $('#presetsBtn').setAttribute('aria-label', current ? `Presets: ${current.name} is open` : 'Presets');
+  $('#presetList').replaceChildren(...settings.presets.map((preset) => el('li', {},
+    el('button', {
+      type: 'button',
+      class: 'preset-pick',
+      'aria-current': preset === current ? 'true' : null,
+      onclick: () => applyPreset(preset),
+    },
+    el('span', { class: 'preset-name' }, preset.name),
+    el('span', { class: 'preset-what' }, describeChats(preset.sources))),
+    el('button', {
+      type: 'button',
+      class: 'x',
+      title: 'Delete this preset',
+      'aria-label': `Delete the preset “${preset.name}”`,
+      onclick: () => deletePreset(preset),
+    }, '×'),
+  )));
+  $('#presetEmpty').hidden = settings.presets.length > 0;
+  renderPresetSave();
+}
+
+function renderPresetSave() {
+  const name = $('#presetName').value.trim().toLowerCase();
+  const exists = name && settings.presets.some((p) => p.name.toLowerCase() === name);
+  $('#presetSaveBtn').textContent = exists ? 'Update' : 'Save';
+}
+
+function openPresets() {
+  const current = currentPreset();
+  const list = chatListOf(chats);
+  $('#presetName').value = current ? current.name : list.length ? sourceLabel(list[0].platform, NORMALIZE[list[0].platform](list[0].input)).replace(/^[#@]/, '') : '';
+  $('#presetStatus').textContent = '';
+  renderPresets();
+  $('#presetsPanel').hidden = false;
+  $('#presetsBtn').setAttribute('aria-expanded', 'true');
+  ($('#presetList .preset-pick') || $('#presetName')).focus();
+}
+
+function closePresets({ focus = false } = {}) {
+  if ($('#presetsPanel').hidden) return;
+  $('#presetsPanel').hidden = true;
+  $('#presetsBtn').setAttribute('aria-expanded', 'false');
+  if (focus) $('#presetsBtn').focus();
+}
+
+function savePreset() {
+  const sources = chatListOf(chats);
+  if (!sources.length) {
+    $('#presetStatus').textContent = 'Type a channel into a field first: a preset saves the chats in the top bar.';
+    return;
+  }
+  const name = $('#presetName').value.trim().slice(0, 60) || describeChats(sources).slice(0, 60);
+  const existing = settings.presets.find((p) => p.name.toLowerCase() === name.toLowerCase());
+  if (existing) {
+    existing.sources = sources;
+  } else {
+    if (settings.presets.length >= MAX_PRESETS) {
+      $('#presetStatus').textContent = `That’s ${MAX_PRESETS} presets already. Delete one first.`;
+      return;
+    }
+    settings.presets.push({ name, sources });
+  }
+  saveSettings();
+  renderPresets();
+  $('#presetStatus').textContent = `${existing ? 'Updated' : 'Saved'} “${name}”.`;
+}
+
+function applyPreset(preset) {
+  closePresets({ focus: true });
+  setChatList(preset.sources, { connect: true });
+  announce(`Switched to ${preset.name}`);
+}
+
+function deletePreset(preset) {
+  if (!confirm(`Delete the preset “${preset.name}”? The chats it opens aren’t affected.`)) return;
+  settings.presets = settings.presets.filter((p) => p !== preset);
+  saveSettings();
+  renderPresets();
+  $('#presetName').focus();
+}
+
+$('#presetsBtn').addEventListener('click', () => ($('#presetsPanel').hidden ? openPresets() : closePresets()));
+$('#presetForm').addEventListener('submit', (e) => { e.preventDefault(); savePreset(); });
+$('#presetName').addEventListener('input', renderPresetSave);
+$('#presetsPanel').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.preventDefault(); closePresets({ focus: true }); }
 });
-document.addEventListener('click', (e) => { if (!e.target.closest('#sourceAdd')) closeSourceMenu(); });
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#sourceAdd')) closeAddMenu();
+  // A preset's × asks first, and the panel has to survive that question.
+  if (!e.target.closest('#presets') && e.target.isConnected) closePresets();
+});
 
 $('#pauseBtn').addEventListener('click', () => { userGesture(); togglePause(); });
 $('#skipBtn').addEventListener('click', skipCurrent);
@@ -2473,12 +2725,14 @@ $('#testBtn').addEventListener('click', () => {
   });
   // The desktop app also reads YouTube and TikTok, so show one of each.
   if (RemoteChat.available) {
-    handleRemoteMessage('youtube', {
+    handleRemoteMessage(null, {
+      platform: 'youtube',
       id: `test-${now}-yt`, kind: 'chat', login: 'lofi_listener', userId: 'test-yt', displayName: 'lofi_listener',
       text: 'greetings from YouTube, this stream is so chill',
       paid: { label: 'Super Chat of $5.00', badge: '$5.00 Super Chat' },
     });
-    handleRemoteMessage('tiktok', {
+    handleRemoteMessage(null, {
+      platform: 'tiktok',
       id: `test-${now}-tt`, kind: 'event', login: 'dance.queen', userId: 'test-tt', displayName: 'Dance Queen',
       systemText: 'Dance Queen sent 5 Roses',
     });
@@ -2487,7 +2741,7 @@ $('#testBtn').addEventListener('click', () => {
 
 $('#gateBtn').addEventListener('click', () => {
   $('#gate').hidden = true;
-  connectSources();
+  connectChats({ toggle: false });
 });
 
 if (systemEngine.supported) {
@@ -2527,9 +2781,19 @@ renderCommandHints();
 renderNow();
 
 {
+  // ?channel=name puts that Twitch channel in the top bar, if it isn't there.
   const fromUrl = TwitchChat.normalizeChannel(new URLSearchParams(location.search).get('channel') || '');
-  if (fromUrl) settings.channel = fromUrl;
-  $('#channelInput').value = settings.channel;
+  if (fromUrl && !chats.some((c) => c.platform === 'twitch' && NORMALIZE.twitch(c.input) === fromUrl)) {
+    const empty = chats.find((c) => c.platform === 'twitch' && !c.input.trim());
+    if (empty) {
+      empty.input = fromUrl;
+      empty.inputEl.value = fromUrl;
+    } else {
+      chats.unshift(createChat('twitch', fromUrl));
+    }
+    saveChatList();
+    renderChatFields();
+  }
   if (fromUrl) {
     // Browsers block audio until the page is clicked, so ask once.
     $('#gateChannel').textContent = `#${fromUrl}`;

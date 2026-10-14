@@ -1,8 +1,8 @@
 # Chat Reader: Twitch TTS
 
-Reads a Twitch channel's chat out loud in the browser. No login, no install, no server-side code.
-The [desktop app](#desktop-app) can also read YouTube and TikTok live chat, together with
-Twitch, in one queue: see [YouTube and TikTok](#youtube-and-tiktok).
+Reads Twitch chat out loud in the browser, from one channel or several at once. No login,
+no install, no server-side code. The [desktop app](#desktop-app) can also read YouTube and
+TikTok live chat, in the same queue: see [Several chats at once](#several-chats-at-once).
 
 ## Run it
 
@@ -14,7 +14,7 @@ cd /path/to/Tts && python3 -m http.server 8765
 
 Then open http://localhost:8765. You can also put the folder on any static host, such as GitHub Pages or Netlify, and use it from any computer.
 
-Add `?channel=name` to the URL to prefill a channel, e.g. `http://localhost:8765/?channel=shroud`.
+Add `?channel=name` to the URL to put a Twitch channel in the top bar, e.g. `http://localhost:8765/?channel=shroud`.
 
 Chrome or Edge is recommended. Neural voices need HTTPS, or `localhost`.
 
@@ -122,7 +122,8 @@ Notes:
 
 ## Features
 
-- **Any channel:** type a name or paste a `twitch.tv/...` link. It reconnects automatically if the connection drops.
+- **Any channel, or several:** type a name or paste a `twitch.tv/...` link, and press **+** to read more channels at the same time. Each one reconnects automatically if its connection drops. See [Several chats at once](#several-chats-at-once).
+- **Presets:** save the chats you read as a named preset and switch between streamers in one click.
 - **Replies:** read as *"Alice, replying to Bob: …"*. You can optionally include the message being replied to.
 - **Pause on a message:** press **Alt+P** (⌥P on Mac) or the big button. Reading stops mid-message and new messages keep queueing. Pressing it again continues that same message.
   - Neural voices resume at the exact point.
@@ -142,12 +143,47 @@ Notes:
 - **Readable at any size:** a light, dark or system theme, a stronger-contrast mode, and a *size of everything* setting that scales the whole page up to 200% without a sideways scrollbar. See [Accessibility](#accessibility).
 - **Backup:** save every setting to a file and load it back, on this computer or another one. See [Your settings](#your-settings).
 
-## YouTube and TikTok
+## Several chats at once
 
-Desktop app only. Twitch's field is always there; press **+** next to it to add a
-YouTube or TikTok field, fill in what you want and press *Connect*. Messages from every
-chat go into the same queue and are read in the order they arrive, each with a small
-tag saying where it came from. The × on a field takes that chat away again.
+Each field in the top bar is one chat. Press **+** to add another: in a browser that's
+another Twitch channel, and in the desktop app you choose Twitch, YouTube or TikTok. Any
+mix works, up to 12: two Twitch channels and a TikTok live, or five Twitch channels and two
+YouTube streams. Fill them in and press *Connect*. Every message goes into the same queue
+and is read in the order it arrives. The × on a field removes that chat.
+
+- **Where a message came from:** with more than one chat, each message carries a tag. The
+  tag names the platform, plus the channel when a platform has more than one chat:
+  *TWITCH #shroud*, *YOUTUBE*.
+- **Each field has its own dot:** green while reading, blinking while connecting or
+  waiting, red when something is wrong. Hover over the field for the details. The status
+  line names every chat being read.
+- **Changing one chat leaves the others alone:** after editing a field the button says
+  *Connect* again and only reconnects what changed. When nothing has changed, it says
+  *Disconnect* and stops them all.
+- **Moderation stays per chat:** a timeout or a cleared chat on one channel only takes
+  that channel's messages out of the queue.
+- **Names:** a chatter keeps the same voice and nickname in every Twitch channel. Back-to-back
+  messages only drop the name when they come from the same chat.
+
+### Presets
+
+A preset is a saved set of chats, for switching between streamers. Open **Presets** next
+to the title:
+
+- **Save:** type a name and press *Save* to keep the chats that are in the top bar now.
+  Saving under an existing name updates that preset.
+- **Switch:** click a preset. The top bar takes its chats and connects them. Chats in both
+  the old and new set keep running without reconnecting, and the others stop. Messages
+  already waiting stay in the queue (*Clear queue* drops them).
+- **Delete:** the × next to a preset.
+
+The button shows the preset's name while the top bar matches it. Presets are saved with
+the rest of the settings, backups included. A preset with YouTube or TikTok chats still
+opens in a browser, but those fields say they need the desktop app.
+
+### YouTube and TikTok
+
+Desktop app only.
 
 | Field | What it takes |
 |---|---|
@@ -158,12 +194,6 @@ tag saying where it came from. The × on a field takes that chat away again.
   waits, checking every 30 seconds, and starts reading when the stream starts. It goes
   back to waiting when the stream ends. A link to one particular YouTube stream stops
   when that stream ends.
-- **Each field has its own dot:** green while reading, blinking while connecting or
-  waiting, red when something is wrong. Hover over the field for the details. The status
-  line names every chat being read.
-- **Changing one chat leaves the others alone:** after editing a field the button says
-  *Connect* again and only reconnects what changed. When nothing has changed, it says
-  *Disconnect* and stops them all.
 - **YouTube:** Super Chats and Super Stickers are read as *"Alice sent a Super Chat of
   $5.00: …"*, and never skipped to catch up. New members and gifted memberships are
   events, like Twitch subs. Channel emotes are handled like Twitch emotes. Messages a
@@ -267,6 +297,7 @@ and clearing site data clears them. Under *Backup*:
 
 - **Save settings to a file…** writes `chat-reader-settings-<date>.json` — voices,
   reading options, filters, nicknames, viewer interactions and linked rewards,
+  the chats in the top bar and your presets,
   shortcuts and the display settings above.
   The desktop app opens a normal save dialog (on macOS also from the Settings menu,
   ⌘S); a browser downloads the file.

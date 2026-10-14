@@ -380,37 +380,44 @@ ipcMain.handle('settings:open', async () => {
 
 // Twitch is read by the page itself. These two can't be, because neither
 // answers a web page (no CORS), so they run here and the page gets each
-// message, status change and deletion over IPC.
+// message, status change and deletion over IPC. Several can run at once,
+// on the same platform too; the page names each one with an id.
 const SOURCES = { youtube: YouTubeChat, tiktok: TikTokChat };
-const sources = {};
+const MAX_SOURCES = 24;
+const sources = new Map();
 
 function stopSources() {
-  for (const platform of Object.keys(sources)) stopSource(platform);
+  for (const id of [...sources.keys()]) stopSource(id);
 }
 
-function stopSource(platform) {
-  const source = sources[platform];
+function stopSource(id) {
+  const source = sources.get(id);
   if (!source) return;
-  delete sources[platform];
+  sources.delete(id);
   source.removeAllListeners();
   source.stop();
 }
 
-ipcMain.handle('source:connect', (event, { platform, target } = {}) => {
-  if (!Object.hasOwn(SOURCES, platform)) return false;
-  stopSource(platform);
+ipcMain.handle('source:connect', (event, { id, platform, target } = {}) => {
+  id = String(id || '');
+  if (!/^[\w-]{1,40}$/.test(id) || !Object.hasOwn(SOURCES, platform)) return false;
+  stopSource(id);
+  if (sources.size >= MAX_SOURCES) return false;
   const source = new SOURCES[platform]();
   const page = event.sender;
   source.on('event', (payload) => {
-    if (sources[platform] === source && !page.isDestroyed()) page.send('source:event', { platform, ...payload });
+    if (sources.get(id) !== source || page.isDestroyed()) return;
+    // A message goes inside its own field, so nothing in it can pose as the id.
+    const { type, ...rest } = payload;
+    page.send('source:event', type === 'message' ? { id, type, message: rest } : { ...rest, id, type });
   });
-  sources[platform] = source;
+  sources.set(id, source);
   source.start(String(target || ''));
   return true;
 });
 
-ipcMain.handle('source:disconnect', (_event, { platform } = {}) => {
-  stopSource(platform);
+ipcMain.handle('source:disconnect', (_event, { id } = {}) => {
+  stopSource(String(id || ''));
   return true;
 });
 

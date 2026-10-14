@@ -70,19 +70,21 @@ function sourceLabel(platform, target) {
 /**
  * The page's end of a chat the desktop app reads. Same shape as TwitchChat:
  * connect(), disconnect(), .connected, .channel, and the handlers onStatus,
- * onMessage, onDeleteMessage and onClearChat.
+ * onMessage, onDeleteMessage and onClearChat. `id` tells it apart from other
+ * chats on the same platform; the app sends it back with every event.
  */
 class RemoteChat {
   static get available() {
     return !!(window.chatReaderDesktop && window.chatReaderDesktop.connectSource);
   }
 
-  constructor(platform, handlers) {
+  constructor(id, platform, handlers) {
+    this.id = id;
     this.platform = platform;
     this.h = handlers;
     this.channel = null;
     this.state = 'idle';
-    RemoteChat.all[platform] = this;
+    RemoteChat.all[id] = this;
     RemoteChat.listen();
   }
 
@@ -90,7 +92,7 @@ class RemoteChat {
     if (RemoteChat.listening || !RemoteChat.available) return;
     RemoteChat.listening = true;
     window.chatReaderDesktop.onSourceEvent((event) => {
-      const chat = RemoteChat.all[event && event.platform];
+      const chat = RemoteChat.all[event && event.id];
       if (chat && chat.channel) chat.handle(event);
     });
   }
@@ -112,15 +114,21 @@ class RemoteChat {
       return;
     }
     this.setState('connecting', `Connecting to ${sourceLabel(this.platform, target)}…`);
-    window.chatReaderDesktop.connectSource(this.platform, target);
+    window.chatReaderDesktop.connectSource(this.id, this.platform, target);
   }
 
   disconnect(silent = false) {
     const was = this.channel;
     this.channel = null;
-    if (was && RemoteChat.available) window.chatReaderDesktop.disconnectSource(this.platform);
+    if (was && RemoteChat.available) window.chatReaderDesktop.disconnectSource(this.id);
     this.state = 'idle';
     if (!silent) this.h.onStatus('idle', 'Disconnected');
+  }
+
+  // Taken out of the top bar for good.
+  dispose() {
+    this.disconnect(true);
+    delete RemoteChat.all[this.id];
   }
 
   setState(state, text) {
@@ -135,7 +143,7 @@ class RemoteChat {
         this.setState(event.state, event.text);
         break;
       case 'message':
-        this.h.onMessage(event);
+        this.h.onMessage(event.message);
         break;
       case 'delete':
         this.h.onDeleteMessage(`${LOGIN_PREFIX[this.platform]}${event.id}`);

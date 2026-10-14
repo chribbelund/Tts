@@ -18,29 +18,35 @@
 
 <header class="topbar">
   <h1 class="brand"><span class="brand-mark" aria-hidden="true"></span>Chat Reader</h1>
+  <div class="presets" id="presets">
+    <button type="button" id="presetsBtn" class="btn presets-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="presetsPanel" title="Saved lists of chats, to switch streamers in one click">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11a1 1 0 0 1 1 1v16l-6.5-4.2-6.5 4.2v-16a1 1 0 0 1 1-1z"/></svg>
+      <span id="presetsLabel">Presets</span>
+    </button>
+    <div id="presetsPanel" class="popover presets-panel" role="dialog" aria-label="Presets" hidden>
+      <ul id="presetList" class="preset-list" aria-label="Saved presets"></ul>
+      <p id="presetEmpty" class="hint">No presets yet. Save the chats you’re reading, then switch back to them in one click.</p>
+      <form id="presetForm" class="preset-save" autocomplete="off">
+        <label class="row-label" for="presetName">Save the chats in the top bar as</label>
+        <div class="preset-save-row">
+          <input id="presetName" maxlength="60" spellcheck="false" placeholder="Preset name">
+          <button type="submit" class="btn small primary" id="presetSaveBtn">Save</button>
+        </div>
+        <p class="hint" id="presetStatus" role="status"></p>
+      </form>
+    </div>
+  </div>
   <form id="connectForm" class="connect" autocomplete="off">
-    <!-- Twitch is always there. YouTube and TikTok are added with the + button,
-         and only in the desktop app, which is the only place they can be read.
-         The dot in each field shows that chat's own connection. -->
-    <div class="source-field" data-platform="twitch" data-state="idle">
-      <label class="source-tag" for="channelInput"><span class="dot" aria-hidden="true"></span>Twitch</label>
-      <input id="channelInput" placeholder="Channel or twitch.tv link" spellcheck="false">
-    </div>
-    <div class="source-field desktop-only" data-platform="youtube" data-state="idle" hidden>
-      <label class="source-tag" for="youtubeInput"><span class="dot" aria-hidden="true"></span>YouTube</label>
-      <input id="youtubeInput" placeholder="@handle or video link" spellcheck="false">
-      <button type="button" class="x source-remove" data-remove="youtube" title="Stop reading YouTube" aria-label="Remove YouTube">×</button>
-    </div>
-    <div class="source-field desktop-only" data-platform="tiktok" data-state="idle" hidden>
-      <label class="source-tag" for="tiktokInput"><span class="dot" aria-hidden="true"></span>TikTok</label>
-      <input id="tiktokInput" placeholder="@username" spellcheck="false">
-      <button type="button" class="x source-remove" data-remove="tiktok" title="Stop reading TikTok" aria-label="Remove TikTok">×</button>
-    </div>
-    <div class="source-add desktop-only" id="sourceAdd">
-      <button type="button" id="sourceAddBtn" class="btn add-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="sourceAddMenu" title="Read YouTube or TikTok chat too" aria-label="Add YouTube or TikTok chat">
+    <!-- One field per chat, any number of each platform (js/app.js builds
+         them). YouTube and TikTok are only offered in the desktop app, the
+         only place they can be read. The dot shows each chat's connection. -->
+    <div id="chatFields" class="chat-fields"></div>
+    <div class="source-add" id="sourceAdd">
+      <button type="button" id="sourceAddBtn" class="btn add-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="sourceAddMenu" title="Read another chat at the same time" aria-label="Add another chat">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       </button>
-      <div id="sourceAddMenu" class="source-menu" role="menu" aria-label="Add a chat" hidden>
+      <div id="sourceAddMenu" class="popover source-menu" role="menu" aria-label="Add a chat" hidden>
+        <button type="button" role="menuitem" data-add="twitch" tabindex="-1"><span class="menu-dot" data-platform="twitch" aria-hidden="true"></span>Twitch</button>
         <button type="button" role="menuitem" data-add="youtube" tabindex="-1"><span class="menu-dot" data-platform="youtube" aria-hidden="true"></span>YouTube</button>
         <button type="button" role="menuitem" data-add="tiktok" tabindex="-1"><span class="menu-dot" data-platform="tiktok" aria-hidden="true"></span>TikTok</button>
       </div>
@@ -98,7 +104,7 @@
       <button id="testBtn" class="btn ghost small">Add test messages</button>
     </div>
     <ol id="feed" class="feed" tabindex="-1" aria-labelledby="chatHeading" aria-live="off"></ol>
-    <div id="feedEmpty" class="empty">Enter a channel above and press Connect<span class="desktop-only-inline">. Press + to read YouTube or TikTok chat at the same time</span>. Messages show up here as they arrive and are read in order.</div>
+    <div id="feedEmpty" class="empty">Enter a channel above and press Connect. Press + to read more chats at the same time<span class="desktop-only-inline">, from Twitch, YouTube or TikTok</span>, and save them as a preset to switch back in one click. Messages show up here as they arrive and are read in order.</div>
   </section>
 </main>
 

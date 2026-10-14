@@ -30,10 +30,11 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
   saveFile: (name, text) => ipcRenderer.invoke('settings:save', { name, text }),
   openFile: () => ipcRenderer.invoke('settings:open'),
 
-  // YouTube and TikTok chat, which only the app can reach. Each event is
-  // { platform, type: 'status' | 'message' | 'delete' | 'clear', … }.
-  connectSource: (platform, target) => ipcRenderer.invoke('source:connect', { platform, target }),
-  disconnectSource: (platform) => ipcRenderer.invoke('source:disconnect', { platform }),
+  // YouTube and TikTok chat, which only the app can reach. `id` is the page's
+  // name for one chat, since several can run on the same platform. Each event
+  // is { id, type: 'status' | 'message' | 'delete' | 'clear', … }.
+  connectSource: (id, platform, target) => ipcRenderer.invoke('source:connect', { id, platform, target }),
+  disconnectSource: (id) => ipcRenderer.invoke('source:disconnect', { id }),
   onSourceEvent: (handler) => {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on('source:event', listener);

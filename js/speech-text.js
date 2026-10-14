@@ -167,6 +167,7 @@ function composeSpeech(entry, prev, settings) {
   }
 
   const sameSpeaker = settings.collapseNames && prev && prev.login === entry.login &&
+    prev.sourceId === entry.sourceId &&
     prev.kind === 'chat' && entry.receivedAt - prev.receivedAt < 30000;
 
   if (settings.nameFormat === 'none' || sameSpeaker) return body;
