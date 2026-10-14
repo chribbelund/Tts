@@ -53,7 +53,8 @@ Notes:
 - **Moderation aware:** messages deleted by mods, and messages from banned or timed-out users, are removed from the queue.
 - **Filters:** skip `!commands`, links and specific chatters. You can also cap message length and skip old messages when chat is too fast.
 - **Cleanup:** emojis are stripped, links become "link", and spam like `loooooool` or repeated words is shortened.
-- **Emotes:** Twitch marks its own emotes in the message, but 7TV, BetterTTV and FrankerFaceZ ones arrive as ordinary words, so the channel's emote names are fetched from those three services when you connect. Under *Reading → Emotes* you can skip everything (the default), skip only Twitch's own emotes and make no third-party requests, or have emote names read out loud. A message that is nothing but emotes is skipped instead of read.
+- **Emotes:** Twitch marks its own emotes in the message, but 7TV, BetterTTV and FrankerFaceZ ones arrive as ordinary words, so the channel's emote names are fetched from those three services when you connect. Under *Reading → Emotes* you can skip everything (the default), skip only Twitch's own emotes and make no third-party requests, or have emote names read out loud.
+  - **Messages that are nothing but emotes** are read out by name — `KEKW`, `catJAM` — because staying silent on them makes the reader look broken. Turn off *Still read a message that is nothing but emotes* to skip those instead. Either way, emotes inside a sentence are still taken out, so `Kappa that was close` reads as "that was close".
   - Channel emote sets contain names that are also everyday words (`Chat`, `Stare`, `Timer`). Those are never taken out of a sentence: a name that could be a word someone typed is only dropped when the whole message is emotes.
 
 ## Voice engines
