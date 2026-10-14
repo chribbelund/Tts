@@ -16,8 +16,7 @@
     "pack": "npm run sync-web && electron-builder --dir",
     "dist": "npm run sync-web && electron-builder",
     "dist:mac": "npm run sync-web && electron-builder --mac",
-    "dist:win": "npm run sync-web && electron-builder --win",
-    "dist:linux": "npm run sync-web && electron-builder --linux"
+    "dist:win": "npm run sync-web && electron-builder --win"
   },
   "devDependencies": {
     "electron": "^44.7.2",

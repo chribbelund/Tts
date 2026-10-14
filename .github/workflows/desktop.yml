@@ -29,9 +29,6 @@ jobs:
           - name: Windows (x64, arm64)
             os: windows-latest
             args: --win
-          - name: Linux (x64, arm64)
-            os: ubuntu-latest
-            args: --linux
     steps:
       - uses: actions/checkout@v7
 
@@ -68,8 +65,6 @@ jobs:
             desktop/dist/*.dmg
             desktop/dist/*.zip
             desktop/dist/*.exe
-            desktop/dist/*.AppImage
-            desktop/dist/*.deb
 
   release:
     name: Publish release
@@ -98,10 +93,8 @@ jobs:
             |---|---|
             | macOS (Intel and Apple silicon) | `.dmg`, or `.zip` |
             | Windows | `*-setup.exe` (installer) or `*-portable.exe` |
-            | Linux | `.AppImage` (run it as is) or `.deb` |
 
             The builds are not code-signed, so the first launch needs one extra step:
 
             - **macOS:** right-click the app → *Open* → *Open*.
             - **Windows:** *More info* → *Run anyway* on the SmartScreen notice.
-            - **Linux:** `chmod +x` the AppImage.

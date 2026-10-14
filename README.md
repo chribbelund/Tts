@@ -29,7 +29,10 @@ Download the build for your system from the
 |---|---|
 | macOS (Intel and Apple silicon) | `chat-reader-<version>-mac-universal.dmg`, or the `.zip` |
 | Windows | `...-setup.exe`, or `...-portable.exe` to run it without installing |
-| Linux | `.AppImage` (`chmod +x` it and run it), or the `.deb` |
+
+There's no Linux build; run the page in a browser there, or build it yourself with
+`npx electron-builder --linux` after adding a `linux` section to
+`desktop/electron-builder.yml`.
 
 The builds aren't code-signed, so the first launch needs one extra step: on macOS
 right-click the app and choose *Open*, on Windows choose *More info* → *Run anyway*.
@@ -76,9 +79,9 @@ in the project root, so ⌘R / Ctrl+R picks up your edits. `npm run icons` re-re
 
 ### Releasing
 
-`.github/workflows/desktop.yml` builds macOS, Windows and Linux and attaches the
-binaries to a GitHub release when a tag starting with `v` is pushed. Set the version
-in `desktop/package.json` first — the file names come from it:
+`.github/workflows/desktop.yml` builds macOS and Windows and attaches the binaries to
+a GitHub release when a tag starting with `v` is pushed. Set the version in
+`desktop/package.json` first — the file names come from it:
 
 ```bash
 git tag v1.0.0
