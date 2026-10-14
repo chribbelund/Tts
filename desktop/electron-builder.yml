@@ -53,6 +53,8 @@ portable:
 linux:
   icon: build/icon.png
   category: AudioVideo
+  # .deb needs a maintainer; the noreply address the commits already carry.
+  maintainer: Christoffer Lundqvist <39331850+chribbelund@users.noreply.github.com>
   synopsis: Reads a Twitch channel's chat out loud
   description: >-
     Reads a Twitch channel's chat out loud with neural or system voices, and
