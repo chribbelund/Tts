@@ -167,7 +167,7 @@
               </span>
             </div>
             <ul id="voiceList" class="voice-list" aria-label="Voice pool"></ul>
-            <p class="hint">Each chatter keeps the same voice. Click the voice tag on a message to give that chatter another one.</p>
+            <p class="hint">Each chatter keeps the same voice. Click the voice tag on a message to give that chatter another one, or click their name to pick one.</p>
           </div>
 
           <label class="check"><input type="checkbox" id="varyVoices"> Vary pitch and pace a little per chatter</label>
@@ -205,7 +205,7 @@
           </div>
         </section>
         <section class="tab-panel" role="tabpanel" id="panel-nicknames" aria-labelledby="tab-nicknames" tabindex="0" hidden>
-          <p class="hint">Say a different name for a chatter, in their messages, in replies and in @mentions. Click a name in chat to add it here.</p>
+          <p class="hint">Say a different name for a chatter, in their messages, in replies and in @mentions. Click a name in chat to set one without coming here.</p>
           <ul id="nicknameList" class="nick-list" aria-label="Nicknames"></ul>
           <p id="nicknameEmpty" class="hint nick-empty">No nicknames yet.</p>
           <form id="nicknameForm" class="nick-add" autocomplete="off" novalidate>
@@ -331,6 +331,46 @@
       </div>
     </div>
   </div>
+</dialog>
+
+<dialog id="chatterDialog" class="settings-dialog chatter-dialog" aria-labelledby="chatterTitle">
+  <form id="chatterForm" class="dialog-box" autocomplete="off" novalidate>
+    <header class="dialog-head">
+      <h2 id="chatterTitle">Chatter</h2>
+      <button type="button" class="x close-btn" id="chatterClose" aria-label="Close">✕</button>
+    </header>
+    <div class="chatter-body">
+      <div class="field">
+        <label class="row-label" for="chatterNick">Nickname</label>
+        <input id="chatterNick" spellcheck="false" placeholder="Say as…">
+        <p class="hint">Said instead of their name, in their messages, in replies and in @mentions. Leave empty to use their own name.</p>
+      </div>
+      <div class="field">
+        <label class="row-label" for="chatterVoice">Voice</label>
+        <div class="chatter-row">
+          <select id="chatterVoice"></select>
+          <button type="button" class="btn small" id="chatterHear">Hear it</button>
+        </div>
+      </div>
+      <div class="field chatter-ignore">
+        <button type="button" class="btn small danger" id="chatterIgnoreBtn">Ignore this chatter…</button>
+        <div class="warn" id="chatterIgnoreConfirm" role="alertdialog" aria-labelledby="chatterIgnoreText" hidden>
+          <p id="chatterIgnoreText"></p>
+          <div class="btn-row">
+            <button type="button" class="btn small danger" id="chatterIgnoreYes">Yes, ignore</button>
+            <button type="button" class="btn small" id="chatterIgnoreNo">Cancel</button>
+          </div>
+        </div>
+        <div id="chatterIgnored" class="chatter-row" hidden>
+          <span class="hint">This chatter is ignored, so nothing they write is read.</span>
+          <button type="button" class="btn small" id="chatterUnignore">Stop ignoring</button>
+        </div>
+      </div>
+    </div>
+    <footer class="chatter-foot">
+      <button type="submit" class="btn primary small">Done</button>
+    </footer>
+  </form>
 </dialog>
 
 <div id="gate" class="gate" role="dialog" aria-modal="true" aria-label="Start reading" hidden>

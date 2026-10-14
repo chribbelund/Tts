@@ -602,6 +602,34 @@ body.is-desktop .browser-only { display: none; }
 }
 .tag { min-height: 22px; padding: 2px 10px; }
 
+/* ---------- chatter dialog ---------- */
+/* A small modal on every screen size, unlike the settings dialog. */
+.chatter-dialog,
+:root[data-width="narrow"] .chatter-dialog {
+  width: min(420px, calc(100% - 32px));
+  /* Not auto: a modal dialog has top and bottom insets, which would stretch it. */
+  height: fit-content;
+  max-height: calc(100% - 32px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.chatter-dialog .dialog-box { height: auto; }
+.chatter-body { padding: 18px 20px 4px; display: flex; flex-direction: column; gap: 16px; }
+.chatter-row { display: flex; align-items: center; gap: 8px; }
+.chatter-row select { flex: 1; min-width: 0; }
+.chatter-row .hint { flex: 1; }
+.chatter-body input {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+.chatter-body input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.chatter-ignore { border-top: 1px solid var(--line); padding-top: 14px; }
+.chatter-foot { display: flex; justify-content: flex-end; padding: 12px 20px 16px; }
+.btn.danger[hidden], .warn[hidden] { display: none; }
+
 .btn-row.wrap { flex-wrap: wrap; }
 .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); align-self: flex-start; }
 .btn.danger:hover { border-color: var(--bad); }

@@ -334,8 +334,7 @@ function filterReason(entry) {
   if (entry.handled) return entry.handled;
   if (entry.kind === 'event' && !settings.readEvents) return 'events off';
   if (entry.kind === 'chat') {
-    const ignored = settings.ignoredUsers.toLowerCase().split(/[\s,]+/).filter(Boolean);
-    if (ignored.includes(entry.login)) return 'ignored';
+    if (isIgnored(entry.login)) return 'ignored';
     if (settings.skipCommands && /^\s*!/.test(entry.rawText)) return 'command';
     if (settings.skipLinks && new RegExp(URL_RE.source, 'i').test(entry.rawText)) return 'link';
   }
@@ -973,10 +972,11 @@ function addToFeed(entry) {
   const name = el('button', {
     class: 'name',
     type: 'button',
-    title: 'Set a nickname',
-    'aria-label': `Set a nickname for ${entry.displayName}`,
+    title: 'Nickname, voice and ignoring',
+    'aria-label': `Options for ${entry.displayName}`,
+    'aria-haspopup': 'dialog',
     style: entry.color ? `--c:${entry.color}` : '',
-    onclick: () => editNickname(entry.login),
+    onclick: (e) => openChatter(entry, e.currentTarget),
   }, entry.displayName);
   const reward = entry.rewardId ? settings.rewards[entry.rewardId] : null;
   const badges = [
@@ -1405,17 +1405,107 @@ function previewNickname(login) {
   previewVoice(engine, voiceIdFor(login, engine), speakableName('', login, settings.nicknames));
 }
 
-// From a click on a chatter's name: edit their nickname, or start a new one.
-function editNickname(login) {
-  if (!login) return;
-  const existing = $(`#nicknameList li[data-login="${CSS.escape(login)}"] input`);
-  if (!existing) $('#nickUser').value = login;
-  const target = existing || $('#nickName');
-  openSettings('nicknames');
-  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  target.focus({ preventScroll: true });
-  target.select();
+// ---------------------------------------------------------------------------
+// Chatter dialog: a click on a name in chat
+// ---------------------------------------------------------------------------
+
+const chatterDialog = $('#chatterDialog');
+const chatter = { login: '', displayName: '', opener: null };
+
+const ignoredList = () => settings.ignoredUsers.toLowerCase().split(/[\s,]+/).filter(Boolean);
+const isIgnored = (login) => ignoredList().includes(login);
+
+function setIgnored(login, on) {
+  const others = settings.ignoredUsers.split(/[\s,]+/).filter((u) => u && u.toLowerCase() !== login);
+  settings.ignoredUsers = (on ? [...others, login] : others).join(', ');
+  $('#ignoredUsers').value = settings.ignoredUsers;
+  saveSettings();
+  if (!on) return;
+  // What they already wrote and is still waiting, or being read, goes too.
+  for (const entry of [reader.current, ...reader.queue]) {
+    if (entry && entry.login === login && entry.kind === 'chat') removeFromQueue(entry, 'filtered', 'ignored');
+  }
 }
+
+function renderChatterIgnore(confirming = false) {
+  const ignored = isIgnored(chatter.login);
+  $('#chatterIgnoreBtn').hidden = ignored || confirming;
+  $('#chatterIgnoreConfirm').hidden = !confirming;
+  $('#chatterIgnored').hidden = !ignored;
+  $('#chatterIgnoreText').textContent = `Stop reading everything ${chatter.displayName} writes? You can undo this here or under Filters.`;
+}
+
+function renderChatterVoices() {
+  const engine = activeEngine();
+  const current = voiceIdFor(chatter.login, engine);
+  $('#chatterVoice').replaceChildren(...voicePool(engine).map((id) => el('option', { value: id, selected: id === current }, voiceName(engine, id))));
+}
+
+// What the dialog would make the reader say right now, saved or not.
+function chatterSpokenName() {
+  const typed = $('#chatterNick').value.trim();
+  return speakableName(chatter.displayName, chatter.login, typed ? { [chatter.login]: typed } : {});
+}
+
+function hearChatter() {
+  const engine = activeEngine();
+  if (!engine.preview) return;
+  previewVoice(engine, $('#chatterVoice').value, `${chatterSpokenName()}: this is how I sound.`);
+}
+
+function saveChatterNickname() {
+  const typed = $('#chatterNick').value.trim();
+  if (typed !== (settings.nicknames[chatter.login] || '')) setNickname(chatter.login, typed);
+}
+
+function openChatter(entry, opener) {
+  if (!entry.login) return;
+  Object.assign(chatter, { login: entry.login, displayName: entry.displayName || entry.login, opener });
+  $('#chatterTitle').textContent = chatter.displayName;
+  $('#chatterNick').value = settings.nicknames[chatter.login] || '';
+  renderChatterVoices();
+  renderChatterIgnore();
+  chatterDialog.showModal();
+  $('#chatterNick').focus();
+  $('#chatterNick').select();
+}
+
+$('#chatterForm').addEventListener('submit', (e) => { e.preventDefault(); chatterDialog.close(); });
+$('#chatterClose').addEventListener('click', () => chatterDialog.close());
+chatterDialog.addEventListener('click', (e) => { if (e.target === chatterDialog) chatterDialog.close(); });
+chatterDialog.addEventListener('close', () => {
+  saveChatterNickname();
+  const opener = chatter.opener;
+  chatter.opener = null;
+  if (opener && opener.isConnected) opener.focus();
+});
+$('#chatterNick').addEventListener('change', saveChatterNickname);
+$('#chatterVoice').addEventListener('change', (e) => {
+  const engine = activeEngine();
+  setUserVoice(chatter.login, engine, e.target.value);
+  hearChatter();
+});
+$('#chatterHear').addEventListener('click', hearChatter);
+$('#chatterIgnoreBtn').addEventListener('click', () => {
+  renderChatterIgnore(true);
+  $('#chatterIgnoreNo').focus();
+});
+$('#chatterIgnoreNo').addEventListener('click', () => {
+  renderChatterIgnore();
+  $('#chatterIgnoreBtn').focus();
+});
+$('#chatterIgnoreYes').addEventListener('click', () => {
+  setIgnored(chatter.login, true);
+  renderChatterIgnore();
+  announce(`${chatter.displayName} is now ignored`);
+  $('#chatterUnignore').focus();
+});
+$('#chatterUnignore').addEventListener('click', () => {
+  setIgnored(chatter.login, false);
+  renderChatterIgnore();
+  announce(`${chatter.displayName} is no longer ignored`);
+  $('#chatterIgnoreBtn').focus();
+});
 
 $('#nicknameForm').addEventListener('submit', (e) => {
   e.preventDefault();
