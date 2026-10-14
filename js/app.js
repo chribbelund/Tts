@@ -9,6 +9,12 @@ const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
 const DEFAULTS = {
   channel: '',
+  // How the page looks. Kept with everything else so a backup carries it over.
+  theme: 'auto',         // auto | light | dark
+  uiScale: 100,          // percent; zooms the whole interface
+  highContrast: false,
+  reduceMotion: false,
+  announce: true,        // short screen-reader notices on pause, skip, volume
   engine: 'kokoro',
   kokoroMode: 'auto',
   kokoroVoices: KOKORO_BEST,
@@ -41,7 +47,28 @@ const DEFAULTS = {
   globalHotkeys: true, // desktop app only: let the OS deliver the keys from any app
   userVoices: { kokoro: {}, system: {} },
   nicknames: {}, // twitch login -> spoken name
+  // What viewers can do from chat. "Who" settings are everyone | subs | vips | mods | off.
+  cheerAnnounce: true,   // "Alice cheered 100 bits: …"
+  cheerPriority: 0,      // cheers of at least this many bits are read first (0 = off)
+  cheerEffects: 0,       // cheers of at least this many bits may pick a voice effect (0 = off)
+  highlightPriority: true,
+  voiceCommand: '!voice',
+  voiceCommandWho: 'everyone',
+  voiceConfirm: true,    // say "Alice now sounds like this" in the new voice
+  modCommand: '!tts',
+  modCommandWho: 'mods',
+  rewards: {},           // channel points reward id -> { name, action }
 };
+
+// Switches that are one checkbox each, in the order they appear on the page.
+const APPEARANCE_SETTINGS = ['highContrast', 'reduceMotion'];
+const NUMBER_SETTINGS = ['maxLength', 'catchUp', 'cheerPriority', 'cheerEffects'];
+const CHECKBOX_SETTINGS = [
+  ...APPEARANCE_SETTINGS, 'announce',
+  'varyVoices', 'collapseNames', 'quoteParent', 'readEvents', 'readEmojis',
+  'skipCommands', 'skipLinks',
+  'cheerAnnounce', 'highlightPriority', 'voiceConfirm',
+];
 
 // JSON rather than structuredClone, which older Safari lacks.
 const cloneDefaults = () => JSON.parse(JSON.stringify(DEFAULTS));
@@ -55,6 +82,7 @@ function loadSettings() {
       keys: { ...DEFAULTS.keys, ...(saved.keys || {}) },
       userVoices: { kokoro: {}, system: {}, ...(saved.userVoices || {}) },
       nicknames: { ...(saved.nicknames || {}) },
+      rewards: { ...(saved.rewards || {}) },
     };
   } catch {
     return cloneDefaults();
@@ -98,6 +126,96 @@ function el(tag, props = {}, ...children) {
   }
   return node;
 }
+
+// ---------------------------------------------------------------------------
+// Appearance and screen-reader notices
+// ---------------------------------------------------------------------------
+
+const UI_SCALES = [100, 115, 130, 150, 175, 200];
+
+// Theme, contrast, motion and size are all read off <html> by the stylesheet.
+function applyAppearance() {
+  const root = document.documentElement;
+  root.dataset.theme = settings.theme;
+  if (settings.highContrast) root.dataset.contrast = 'high';
+  else delete root.dataset.contrast;
+  if (settings.reduceMotion) root.dataset.motion = 'reduce';
+  else delete root.dataset.motion;
+  root.style.setProperty('--ui-zoom', String(settings.uiScale / 100));
+  applyLayoutWidth();
+}
+
+// Zooming the page doesn't move a CSS media query, which keeps measuring the
+// window, so the layout's own breakpoints are decided here instead: against
+// the width the page is left with once the zoom is taken off.
+function applyLayoutWidth() {
+  const usable = window.innerWidth / (settings.uiScale / 100);
+  document.documentElement.dataset.width = usable < 860 ? 'narrow' : usable < 1100 ? 'medium' : 'wide';
+}
+
+window.addEventListener('resize', applyLayoutWidth);
+
+// Hotkeys and the tray can pause, skip or change the volume without anything
+// on screen moving under the reader's cursor, so say what happened in a live
+// region. Chat messages are left out: they're read out loud already.
+const srAnnounce = $('#srAnnounce');
+let announceTimer = null;
+
+function announce(text) {
+  if (!srAnnounce || !settings.announce || !text) return;
+  // Setting the same text twice isn't announced again, so clear it first.
+  clearTimeout(announceTimer);
+  srAnnounce.textContent = '';
+  announceTimer = setTimeout(() => { srAnnounce.textContent = text; }, 60);
+}
+
+// ---------------------------------------------------------------------------
+// Settings dialog
+// ---------------------------------------------------------------------------
+
+// Everything that isn't needed while chat is being read sits in a dialog, one
+// tab per section, so the main window fits without scrolling.
+const settingsDialog = $('#settingsDialog');
+const settingsTabs = $$('#settingsDialog [role="tab"]');
+
+function selectSettingsTab(name, { focus = false } = {}) {
+  for (const tab of settingsTabs) {
+    const on = tab.dataset.tab === name;
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    $(`#${tab.getAttribute('aria-controls')}`).hidden = !on;
+    if (on && focus) tab.focus();
+  }
+  $('#settingsDialog .tab-panels').scrollTop = 0;
+}
+
+function openSettings(tab) {
+  if (tab) selectSettingsTab(tab);
+  if (!settingsDialog.open) settingsDialog.showModal();
+  if (!tab) settingsTabs.find((t) => t.getAttribute('aria-selected') === 'true').focus();
+}
+
+function closeSettings() {
+  if (settingsDialog.open) settingsDialog.close();
+}
+
+$('#settingsBtn').addEventListener('click', () => openSettings());
+$('#settingsClose').addEventListener('click', closeSettings);
+// The box fills the dialog, so a click landing on the dialog itself is a
+// click on the dimmed backdrop around it.
+settingsDialog.addEventListener('click', (e) => { if (e.target === settingsDialog) closeSettings(); });
+settingsDialog.addEventListener('close', () => $('#settingsBtn').focus());
+
+for (const tab of settingsTabs) tab.addEventListener('click', () => selectSettingsTab(tab.dataset.tab));
+$('#settingsDialog [role="tablist"]').addEventListener('keydown', (e) => {
+  const i = settingsTabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  const last = settingsTabs.length - 1;
+  const next = { ArrowDown: i + 1, ArrowRight: i + 1, ArrowUp: i - 1, ArrowLeft: i - 1, Home: 0, End: last }[e.key];
+  if (next === undefined) return;
+  e.preventDefault();
+  selectSettingsTab(settingsTabs[(next + last + 1) % (last + 1)].dataset.tab, { focus: true });
+});
 
 // ---------------------------------------------------------------------------
 // Engines and voices
@@ -148,11 +266,15 @@ function voiceOptionsFor(entry, engine) {
   const h = hashString(`${entry.login}#vary`);
   const pitchJitter = settings.varyVoices ? ((h % 21) - 10) / 100 : 0;         // ±0.10
   const paceJitter = settings.varyVoices ? (((h >>> 8) % 11) - 5) / 100 : 0;   // ±0.05
+  // Neural voices play the effect through Web Audio; system voices can only
+  // approximate it with their own pitch and pace.
+  const fx = VOICE_EFFECTS[entry.effect] || null;
   return {
     voiceId,
-    rate: settings.rate * (1 + paceJitter),
+    rate: settings.rate * (1 + paceJitter) * ((fx && fx.rate) || 1),
     speed: Math.min(2, Math.max(0.5, settings.rate * (1 + paceJitter))),
-    pitch: 1 + pitchJitter,
+    pitch: fx && fx.pitch !== undefined ? fx.pitch : 1 + pitchJitter,
+    effect: fx ? entry.effect : null,
   };
 }
 
@@ -185,10 +307,19 @@ function enqueue(entry) {
     return;
   }
   setStatus(entry, 'queued');
-  reader.queue.push(entry);
+  if (entry.priority) {
+    // In front of everything else, but behind earlier ones that also paid.
+    const at = reader.queue.findIndex((e) => !e.priority);
+    reader.queue.splice(at === -1 ? reader.queue.length : at, 0, entry);
+  } else {
+    reader.queue.push(entry);
+  }
 
   if (settings.catchUp > 0 && reader.queue.length > settings.catchUp) {
-    for (const old of reader.queue.splice(0, reader.queue.length - settings.catchUp)) {
+    // Oldest first, but never something a viewer spent bits or points on.
+    const excess = reader.queue.length - settings.catchUp;
+    for (const old of reader.queue.filter((e) => !isPaidFor(e)).slice(0, excess)) {
+      reader.queue.splice(reader.queue.indexOf(old), 1);
       setStatus(old, 'skipped', 'skipped to catch up');
     }
   }
@@ -196,7 +327,11 @@ function enqueue(entry) {
   renderNow();
 }
 
+const isPaidFor = (entry) => !!(entry.priority || entry.bits || entry.rewardId);
+
 function filterReason(entry) {
+  // A chat command that did something says what instead of being read.
+  if (entry.handled) return entry.handled;
   if (entry.kind === 'event' && !settings.readEvents) return 'events off';
   if (entry.kind === 'chat') {
     const ignored = settings.ignoredUsers.toLowerCase().split(/[\s,]+/).filter(Boolean);
@@ -269,6 +404,11 @@ const ACTIONS = {
   volumeDown: () => setVolume(settings.volume - 5),
   clear: () => clearQueue(),
   toggleWindow: () => desktop && desktop.toggleWindow(),
+  // Not bound to a key; the desktop app's Settings menu sends these. The
+  // backup tab is opened first so its status line can be seen.
+  openSettings: () => openSettings(),
+  exportSettings: () => { openSettings('backup'); exportSettings(); },
+  importSettings: () => { openSettings('backup'); importSettings(); },
 };
 
 function runAction(action) {
@@ -283,11 +423,21 @@ function setVolume(value, { live = false } = {}) {
   const next = Math.max(0, Math.min(100, Math.round(value)));
   settings.volume = next;
   $('#volume').value = next;
+  $('#volume').setAttribute('aria-valuetext', `${next} percent`);
   $('#volumeOut').textContent = `${next}%`;
+  // While the slider itself is being dragged the screen reader already reads
+  // out every step, so only a change from somewhere else is worth saying.
+  if (!live) announce(`Volume ${next} percent`);
   // Neural playback follows the volume while the slider moves; a system-voice
   // utterance has to be restarted for it, so that waits until the slider is
   // let go (or until a hotkey changes the volume in one step).
   if (reader.controller && (!live || reader.current.engine === kokoroEngine)) reader.controller.volumeChanged();
+  saveSettings();
+}
+
+function setRate(value) {
+  settings.rate = Math.max(0.6, Math.min(2, Math.round(value * 20) / 20));
+  renderRate();
   saveSettings();
 }
 
@@ -301,18 +451,22 @@ function setPaused(paused) {
   if (!paused) pump();
   renderNow();
   updateMediaSession();
+  announce(paused ? 'Reading paused' : 'Reading resumed');
 }
 
 function skipCurrent() {
   if (!reader.current) return;
   setStatus(reader.current, 'skipped', 'skipped');
   reader.controller.stop();
+  announce('Message skipped');
 }
 
 function clearQueue() {
+  const cleared = reader.queue.length;
   for (const entry of reader.queue) setStatus(entry, 'skipped', 'cleared');
   reader.queue.length = 0;
   renderNow();
+  announce(cleared ? `Cleared ${cleared} waiting message${cleared === 1 ? '' : 's'}` : 'Nothing was waiting');
 }
 
 function removeFromQueue(entry, status, note) {
@@ -410,10 +564,18 @@ function speechBodyFor(rawText, emotesTag, reply) {
 // after the emote settings change or the emote sets finish loading.
 function refreshSpeechBodies() {
   for (const entry of [...reader.queue, reader.current]) {
-    if (!entry || entry.rawText === undefined) continue;
-    const reply = entry.isReply ? { login: entry.parentLogin, displayName: entry.parentDisplayName } : null;
-    entry.speechBody = speechBodyFor(entry.rawText, entry.emotesTag, reply);
+    if (!entry || entry.rawText === undefined || entry.kind === 'notice') continue;
+    entry.speechBody = entrySpeechBody(entry);
   }
+}
+
+// What a chat entry says once the cheermotes and a chosen effect word are out.
+function entrySpeechBody(entry) {
+  const reply = entry.isReply ? { login: entry.parentLogin, displayName: entry.parentDisplayName } : null;
+  let body = speechBodyFor(entry.rawText, entry.emotesTag, reply);
+  if (entry.bits) body = stripCheermotes(body);
+  if (entry.effectWord) body = body.replace(EFFECT_WORD_RE, '');
+  return body;
 }
 
 function entryFromPrivmsg(msg) {
@@ -425,9 +587,6 @@ function entryFromPrivmsg(msg) {
 
   const login = (tags.login || msg.prefix.split('!')[0] || '').toLowerCase();
   const isReply = !!tags['reply-parent-msg-id'];
-
-  const reply = isReply ? { login: tags['reply-parent-user-login'], displayName: tags['reply-parent-display-name'] } : null;
-  const speechBody = speechBodyFor(text, tags.emotes, reply);
 
   let displayText = text;
   if (isReply) displayText = stripLeadingMention(text, tags['reply-parent-user-login'], tags['reply-parent-display-name']);
@@ -442,12 +601,15 @@ function entryFromPrivmsg(msg) {
     rawText: text,
     emotesTag: tags.emotes,
     displayText,
-    speechBody,
     action,
     isReply,
     parentLogin: tags['reply-parent-user-login'],
     parentDisplayName: tags['reply-parent-display-name'],
     parentBody: tags['reply-parent-msg-body'],
+    role: roleLevel(tags),
+    bits: Number(tags.bits) || 0,
+    rewardId: tags['custom-reward-id'] || null,
+    highlighted: tags['msg-id'] === 'highlighted-message',
   };
 }
 
@@ -470,9 +632,294 @@ function entryFromUserNotice(msg) {
   return { ...base, kind: 'event', systemText: tags['system-msg'] || '' };
 }
 
+// ---------------------------------------------------------------------------
+// Viewer interactions: bits, channel point rewards and chat commands
+// ---------------------------------------------------------------------------
+
+// The page reads chat anonymously, so it only sees what Twitch puts in chat:
+// cheers, rewards that ask the viewer to type something, and messages. It
+// can't answer in chat either, so the reader says the result out loud.
+
+function handlePrivmsg(msg) {
+  const entry = entryFromPrivmsg(msg);
+  if (entry.bits) applyCheer(entry);
+  if (entry.rewardId) applyReward(entry);
+  if (entry.highlighted && settings.highlightPriority) entry.priority = true;
+  if (!entry.bits && !entry.rewardId) runChatCommand(entry);
+  entry.speechBody = entrySpeechBody(entry);
+  enqueue(entry);
+}
+
+// Who may do something, lowest to highest. The broadcaster passes them all.
+const ROLE_LEVELS = { everyone: 0, subs: 1, vips: 2, mods: 3 };
+
+function roleLevel(tags) {
+  const badges = new Set((tags.badges || '').split(',').map((b) => b.split('/')[0]));
+  if (badges.has('broadcaster')) return 4;
+  if (tags.mod === '1' || badges.has('moderator')) return 3;
+  if (tags.vip === '1' || badges.has('vip')) return 2;
+  if (tags.subscriber === '1' || badges.has('subscriber') || badges.has('founder')) return 1;
+  return 0;
+}
+
+const mayUse = (entry, who) => who in ROLE_LEVELS && entry.role >= ROLE_LEVELS[who];
+
+// "Cheer200 robot hello" or "Cheer200 (robot) hello": the first word picks the effect.
+const EFFECT_WORD_RE = new RegExp(`^\\s*\\(?(${Object.keys(VOICE_EFFECTS).join('|')})\\)?[:,]?(?=\\s|$)`, 'i');
+
+function applyCheer(entry) {
+  if (settings.cheerPriority > 0 && entry.bits >= settings.cheerPriority) entry.priority = true;
+  if (settings.cheerEffects > 0 && entry.bits >= settings.cheerEffects) {
+    const match = stripCheermotes(entry.rawText).match(EFFECT_WORD_RE);
+    if (match) {
+      entry.effect = match[1].toLowerCase();
+      entry.effectWord = true;
+    }
+  }
+}
+
+// What a linked reward can do. The name is what the streamer sees in the
+// list; the label is what the drop-down says.
+const REWARD_ACTIONS = {
+  voice: { name: 'Pick your voice', label: 'Pick their voice (they type a voice name)' },
+  priority: { name: 'Skip the line', label: 'Read the message before everything else' },
+  ...Object.fromEntries(Object.entries(VOICE_EFFECTS).map(([id, fx]) => [id, {
+    name: `${fx.label} voice`,
+    label: `Read the message in the ${fx.label.toLowerCase()} voice${fx.neuralOnly ? ' (neural voices)' : ''}`,
+  }])),
+};
+
+function applyReward(entry) {
+  if (rewardLink.action) linkReward(entry);
+  const reward = settings.rewards[entry.rewardId];
+  if (!reward) return;
+  if (reward.action === 'voice') entry.handled = pickVoice(entry, entry.rawText);
+  else if (reward.action === 'priority') entry.priority = true;
+  else if (VOICE_EFFECTS[reward.action]) entry.effect = reward.action;
+}
+
+// Returns what follows the command word, '' for the bare command, or null
+// when the message isn't that command at all.
+function commandArgs(text, command) {
+  if (!command) return null;
+  const t = text.trim();
+  const lower = t.toLowerCase();
+  if (lower === command) return '';
+  return lower.startsWith(`${command} `) ? t.slice(command.length + 1).trim() : null;
+}
+
+function runChatCommand(entry) {
+  const voiceArgs = commandArgs(entry.rawText, settings.voiceCommand);
+  if (voiceArgs !== null && mayUse(entry, settings.voiceCommandWho)) {
+    entry.handled = pickVoice(entry, voiceArgs);
+    return;
+  }
+  const modArgs = commandArgs(entry.rawText, settings.modCommand);
+  if (modArgs !== null && mayUse(entry, settings.modCommandWho)) entry.handled = runModCommand(modArgs);
+}
+
+// "!tts volume 40", "!tts volume +10", "!tts speed 1.2". Unknown words return
+// null, so the message is treated like any other command.
+function runModCommand(args) {
+  const [verb = '', value = ''] = args.toLowerCase().split(/\s+/);
+  const level = (current, min, max) => {
+    const m = value.match(/^([+-]?)(\d+(?:\.\d+)?)%?$/);
+    if (!m) return null;
+    const n = Number(m[2]);
+    return Math.max(min, Math.min(max, m[1] === '+' ? current + n : m[1] === '-' ? current - n : n));
+  };
+  switch (verb) {
+    case 'skip':
+      skipCurrent();
+      return 'skip';
+    case 'pause':
+    case 'stop':
+      setPaused(true);
+      return 'pause';
+    case 'resume':
+    case 'play':
+    case 'unpause':
+      setPaused(false);
+      return 'resume';
+    case 'clear':
+      clearQueue();
+      return 'clear';
+    case 'volume':
+    case 'vol': {
+      const n = level(settings.volume, 0, 100);
+      if (n === null) return null;
+      setVolume(n);
+      return `volume ${settings.volume}%`;
+    }
+    case 'speed':
+    case 'rate': {
+      const n = level(settings.rate, 0.6, 2);
+      if (n === null) return null;
+      setRate(n);
+      return `speed ${settings.rate.toFixed(2)}×`;
+    }
+  }
+  return null;
+}
+
+// A voice from the pool by name: an exact name first, then a whole word of
+// it ("aria" for "Aria (Natural)"), then any part of it.
+function findVoice(engine, query) {
+  const pool = voicePool(engine);
+  const score = (id, q) => {
+    const name = voiceName(engine, id).toLowerCase();
+    if (name === q) return 3;
+    if (name.split(/[^\p{L}\p{N}]+/u).includes(q)) return 2;
+    return name.includes(q) ? 1 : 0;
+  };
+  const q = query.trim().toLowerCase();
+  for (const attempt of [q, q.split(/\s+/)[0]]) {
+    let best = null;
+    let bestScore = 0;
+    for (const id of pool) {
+      const s = score(id, attempt);
+      if (s > bestScore) { best = id; bestScore = s; }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+const voiceConfirmedAt = new Map();
+
+// From "!voice Bella" or a reward: give the chatter that voice, or the next
+// one in the pool when no name is given. Returns what the feed shows.
+function pickVoice(entry, query) {
+  const engine = activeEngine();
+  const pool = voicePool(engine);
+  let next;
+  if (query.trim()) {
+    next = findVoice(engine, query);
+    if (!next) return 'no such voice';
+  } else {
+    if (pool.length < 2) return 'only one voice';
+    next = pool[(pool.indexOf(voiceIdFor(entry.login, engine)) + 1) % pool.length];
+  }
+  setUserVoice(entry.login, engine, next);
+
+  // Viewers can't see the page, so they hear the new voice instead, but only
+  // once in a while: someone flipping through voices shouldn't flood the queue.
+  const last = voiceConfirmedAt.get(entry.login) || 0;
+  if (settings.voiceConfirm && Date.now() - last > 15000) {
+    voiceConfirmedAt.set(entry.login, Date.now());
+    const text = `${speakableName(entry.displayName, entry.login, settings.nicknames)} now sounds like this.`;
+    queueMicrotask(() => enqueue({
+      id: `notice-${entry.id}`,
+      kind: 'notice',
+      login: entry.login,
+      userId: entry.userId,
+      displayName: entry.displayName,
+      color: entry.color,
+      rawText: text,
+      displayText: text,
+      speechBody: text,
+    }));
+  }
+  return `voice: ${voiceName(engine, next)}`;
+}
+
+// Linking a reward: Twitch only gives its id, not its title, so the streamer
+// redeems it once and the next unknown reward that comes through is it.
+const rewardLink = { action: null };
+
+function startRewardLink() {
+  if (rewardLink.action) {
+    stopRewardLink('');
+    return;
+  }
+  rewardLink.action = $('#rewardAction').value;
+  $('#rewardLinkBtn').textContent = 'Stop waiting';
+  $('#rewardStatus').textContent = chat.connected
+    ? `Waiting… Redeem the reward on #${chat.channel} now.`
+    : 'Waiting… Connect to your channel, then redeem the reward.';
+}
+
+function stopRewardLink(status) {
+  rewardLink.action = null;
+  $('#rewardLinkBtn').textContent = 'Link the next redemption';
+  $('#rewardStatus').textContent = status;
+}
+
+function linkReward(entry) {
+  const existing = settings.rewards[entry.rewardId];
+  if (existing) {
+    $('#rewardStatus').textContent = `That one is already linked as “${existing.name}”. Still waiting for a different reward…`;
+    return;
+  }
+  const action = rewardLink.action;
+  settings.rewards[entry.rewardId] = { name: REWARD_ACTIONS[action].name, action };
+  saveSettings();
+  renderRewards();
+  stopRewardLink(`Linked the reward ${entry.displayName} redeemed. Give it the name you use on Twitch, so you can tell them apart.`);
+  const input = $(`#rewardList li[data-reward="${CSS.escape(entry.rewardId)}"] input`);
+  if (input) { input.focus(); input.select(); }
+}
+
+function renderRewards() {
+  const options = (selected) => Object.entries(REWARD_ACTIONS)
+    .map(([value, a]) => el('option', { value, selected: value === selected }, a.label));
+  const rows = Object.entries(settings.rewards);
+  $('#rewardList').replaceChildren(...rows.map(([id, reward]) => el('li', { 'data-reward': id },
+    el('input', {
+      value: reward.name,
+      spellcheck: 'false',
+      'aria-label': 'Reward name',
+      onchange: (e) => {
+        reward.name = e.target.value.trim().slice(0, 60) || REWARD_ACTIONS[reward.action].name;
+        e.target.value = reward.name;
+        saveSettings();
+      },
+    }),
+    el('select', {
+      'aria-label': `What “${reward.name}” does`,
+      onchange: (e) => { reward.action = e.target.value; saveSettings(); },
+    }, options(reward.action)),
+    el('button', {
+      class: 'x',
+      type: 'button',
+      title: 'Unlink this reward',
+      'aria-label': `Unlink “${reward.name}”`,
+      onclick: () => { delete settings.rewards[id]; saveSettings(); renderRewards(); },
+    }, '×'),
+  )));
+  $('#rewardEmpty').hidden = rows.length > 0;
+}
+
+$('#rewardAction').append(...Object.entries(REWARD_ACTIONS).map(([value, a]) => el('option', { value }, a.label)));
+$('#rewardLinkBtn').addEventListener('click', startRewardLink);
+
+// The command words, as typed into the settings: lower case, one word, and
+// with a ! in front if the streamer left it off, so "voice" can't match
+// ordinary chat.
+function cleanCommand(value) {
+  const word = String(value || '').trim().toLowerCase().split(/\s+/)[0].slice(0, 25);
+  return word && /^[\p{L}\p{N}]/u.test(word) ? `!${word}` : word;
+}
+
+function renderCommandHints() {
+  for (const node of $$('[data-command]')) node.textContent = settings[node.dataset.command] || '(off)';
+}
+
+for (const key of ['voiceCommand', 'modCommand']) {
+  $(`#${key}`).addEventListener('change', (e) => {
+    settings[key] = cleanCommand(e.target.value);
+    e.target.value = settings[key];
+    saveSettings();
+    renderCommandHints();
+  });
+}
+for (const key of ['voiceCommandWho', 'modCommandWho']) {
+  $(`#${key}`).addEventListener('change', (e) => { settings[key] = e.target.value; saveSettings(); });
+}
+
 const chat = new TwitchChat({
   onStatus: renderConnection,
-  onMessage: (msg) => enqueue(entryFromPrivmsg(msg)),
+  onMessage: handlePrivmsg,
   onUserNotice: (msg) => enqueue(entryFromUserNotice(msg)),
   onRoomState: (roomId) => loadThirdPartyEmotes(roomId),
   onClearChat: (userId) => {
@@ -519,7 +966,7 @@ function addToFeed(entry) {
     class: 'x',
     type: 'button',
     title: 'Don’t read this message',
-    'aria-label': 'Remove from queue',
+    'aria-label': `Don’t read this message from ${entry.displayName}`,
     onclick: () => removeFromQueue(entry, 'skipped', 'removed'),
   }, '×');
 
@@ -527,12 +974,23 @@ function addToFeed(entry) {
     class: 'name',
     type: 'button',
     title: 'Set a nickname',
+    'aria-label': `Set a nickname for ${entry.displayName}`,
     style: entry.color ? `--c:${entry.color}` : '',
     onclick: () => editNickname(entry.login),
   }, entry.displayName);
+  const reward = entry.rewardId ? settings.rewards[entry.rewardId] : null;
+  const badges = [
+    entry.bits ? `${entry.bits.toLocaleString()} bits` : null,
+    entry.rewardId ? (reward ? reward.name : 'channel points') : null,
+    entry.highlighted ? 'highlighted' : null,
+    entry.effect ? VOICE_EFFECTS[entry.effect].label.toLowerCase() : null,
+    entry.priority ? 'read first' : null,
+  ].filter(Boolean);
+  const label = { event: 'Event', notice: 'Reader' }[entry.kind];
   const meta = el('div', { class: 'meta' },
-    entry.kind === 'event' ? el('span', { class: 'reply-to' }, 'Event') : name,
+    label ? el('span', { class: 'reply-to' }, label) : name,
     entry.kind === 'announcement' ? el('span', { class: 'reply-to' }, 'announcement') : null,
+    badges.map((b) => el('span', { class: 'badge' }, b)),
     entry.isReply ? el('span', { class: 'reply-to' }, `↩ replying to @${entry.parentDisplayName || entry.parentLogin}`) : null,
     el('span', { class: 'tail' }, voiceBtn, stateEl, removeBtn),
   );
@@ -572,7 +1030,9 @@ function updateVoiceTag(entry) {
   if (entry.kind === 'event' || !entry.login) { entry.voiceBtn.hidden = true; return; }
   const engine = entry.status === 'done' || entry.status === 'speaking' ? entry.engine || activeEngine() : activeEngine();
   const id = entry.status === 'done' || entry.status === 'speaking' ? entry.voiceId : voiceIdFor(entry.login, engine);
-  entry.voiceBtn.textContent = voiceName(engine, id);
+  const name = voiceName(engine, id);
+  entry.voiceBtn.textContent = name;
+  entry.voiceBtn.setAttribute('aria-label', `Voice for ${entry.displayName}: ${name}. Pick the next one.`);
 }
 
 function refreshVoiceTags() {
@@ -585,10 +1045,14 @@ function cycleUserVoice(entry) {
   if (pool.length < 2) return;
   const current = voiceIdFor(entry.login, engine);
   const next = pool[(pool.indexOf(current) + 1) % pool.length];
-  settings.userVoices[engine.id][entry.login] = next;
-  saveSettings();
-  for (const e of feedEntries) if (e.login === entry.login && e.status !== 'done') updateVoiceTag(e);
+  setUserVoice(entry.login, engine, next);
   engine.preview && previewVoice(engine, next, `This is how ${speakableName(entry.displayName, entry.login, settings.nicknames)} sounds now.`);
+}
+
+function setUserVoice(login, engine, voiceId) {
+  settings.userVoices[engine.id][login] = voiceId;
+  saveSettings();
+  for (const e of feedEntries) if (e.login === login && e.status !== 'done') updateVoiceTag(e);
 }
 
 const nowPanel = $('#nowPanel');
@@ -600,6 +1064,7 @@ function renderNow() {
   nowPanel.dataset.state = state;
   $('#pauseBtn').setAttribute('aria-pressed', String(reader.paused));
   $('#pauseBtn').title = reader.paused ? 'Resume reading' : 'Pause reading';
+  $('#pauseBtn').setAttribute('aria-label', reader.paused ? 'Resume reading' : 'Pause reading');
 
   const loading = entry && reader.controller && reader.controller.loading;
   $('#nowLabel').textContent = reader.paused
@@ -614,17 +1079,22 @@ function renderNow() {
   if (entry) {
     if (entry.kind !== 'event') {
       const name = el('span', { class: 'name' }, entry.displayName);
-      name.style.color = entry.color ? `color-mix(in oklab, ${entry.color} 72%, var(--fg))` : '';
+      name.style.color = entry.color && !settings.highContrast ? `color-mix(in oklab, ${entry.color} 72%, var(--fg))` : '';
       msgEl.append(name);
     }
     if (entry.isReply) msgEl.append(el('span', { class: 'muted' }, ` ↩ @${entry.parentDisplayName || entry.parentLogin}`));
+    if (entry.effect) msgEl.append(el('span', { class: 'muted' }, ` · ${VOICE_EFFECTS[entry.effect].label.toLowerCase()} voice`));
     msgEl.append(el('div', {}, entry.spokenText));
   } else {
     msgEl.append(el('span', { class: 'muted' }, reader.paused
       ? `Reading is paused${waiting ? `, ${waiting} message${waiting === 1 ? '' : 's'} waiting` : ''}. Press ${keyLabel(settings.keys.pause)} to continue.`
       : chat.connected ? 'Waiting for chat messages…' : 'Nothing is being read right now.'));
   }
-  if (!entry) nowBar.style.width = '0';
+  if (!entry) {
+    nowBar.style.width = '0';
+    tickProgress.lastPercent = 0;
+    $('#nowProgress').setAttribute('aria-valuenow', '0');
+  }
 
   for (const e of feedEntries) e.node.classList.toggle('paused', e.status === 'speaking' && reader.paused);
 
@@ -633,7 +1103,13 @@ function renderNow() {
 
 function tickProgress() {
   if (reader.controller) {
-    nowBar.style.width = `${(reader.controller.progress() * 100).toFixed(1)}%`;
+    const percent = reader.controller.progress() * 100;
+    nowBar.style.width = `${percent.toFixed(1)}%`;
+    const whole = Math.round(percent);
+    if (whole !== tickProgress.lastPercent) {
+      tickProgress.lastPercent = whole;
+      $('#nowProgress').setAttribute('aria-valuenow', String(whole));
+    }
     const loading = !!reader.controller.loading;
     if (loading !== tickProgress.lastLoading) { tickProgress.lastLoading = loading; renderNow(); }
   }
@@ -667,6 +1143,27 @@ function renderEngineUI() {
   renderKokoroState(kokoroEngine.state, {});
   renderGpuWarning();
 }
+
+// The line under the player that says which voices are speaking. While the
+// neural model loads it shows how far along it is, since the settings that
+// hold the full status are usually closed.
+function renderVoiceChip(kokoroState = kokoroEngine.state, info = {}) {
+  const chip = $('#voiceChip');
+  const kokoro = settings.engine === 'kokoro';
+  const state = kokoro ? kokoroState : 'ready';
+  const deviceName = (info.device || kokoroEngine.device) === 'webgpu' ? 'GPU' : 'CPU';
+  let text;
+  if (!kokoro) text = 'System voices';
+  else if (state === 'ready') text = `Neural voices · ${deviceName}`;
+  else if (state === 'loading') text = info.progress ? `Loading neural voices… ${Math.round(info.progress * 100)}%` : 'Loading neural voices…';
+  else if (state === 'error') text = 'Neural voices failed · using system voices';
+  else text = 'Neural voices not loaded · using system voices';
+  chip.dataset.state = state;
+  $('#voiceChipText').textContent = text;
+  chip.setAttribute('aria-label', `${text}. Open voice settings.`);
+}
+
+$('#voiceChip').addEventListener('click', () => openSettings('voices'));
 
 function renderLanguageOptions() {
   const langs = new Map();
@@ -707,7 +1204,7 @@ function renderVoiceList() {
           el('span', { class: 'vname' }, v.name),
           el('span', { class: 'vmeta' }, `${v.gender === 'F' ? 'female' : 'male'} · ${v.accent} · `, el('span', { class: good ? 'good' : '' }, v.grade)),
         ),
-        el('button', { class: 'play', type: 'button', title: `Preview ${v.name}`, onclick: () => previewVoice(kokoroEngine, v.id) }, '▶'),
+        el('button', { class: 'play', type: 'button', title: `Preview ${v.name}`, 'aria-label': `Hear ${v.name}`, onclick: () => previewVoice(kokoroEngine, v.id) }, '▶'),
       ));
     }
   } else {
@@ -730,7 +1227,7 @@ function renderVoiceList() {
           el('span', { class: 'vname', title: v.raw.name }, v.name),
           el('span', { class: 'vmeta' }, v.lang, v.natural ? el('span', { class: 'good' }, ' · natural') : null),
         ),
-        el('button', { class: 'play', type: 'button', title: `Preview ${v.name}`, onclick: () => previewVoice(systemEngine, v.id) }, '▶'),
+        el('button', { class: 'play', type: 'button', title: `Preview ${v.name}`, 'aria-label': `Hear ${v.name}`, onclick: () => previewVoice(systemEngine, v.id) }, '▶'),
       ));
     }
   }
@@ -843,8 +1340,11 @@ function renderKokoroState(state, info) {
   const wrap = $('#kokoroProgressWrap');
   if (!status) return;
   const deviceName = (info.device || kokoroEngine.device) === 'webgpu' ? 'GPU' : 'CPU';
+  const changed = state !== renderKokoroState.lastState;
+  renderKokoroState.lastState = state;
   btn.hidden = state === 'loading' || state === 'ready';
   wrap.hidden = state !== 'loading';
+  renderVoiceChip(state, info);
 
   if (state === 'unloaded') {
     status.textContent = 'Not loaded. System voices are used until it is.';
@@ -856,6 +1356,7 @@ function renderKokoroState(state, info) {
     $('#kokoroProgress').style.width = `${((info.progress || 0) * 100).toFixed(1)}%`;
   } else if (state === 'ready') {
     status.textContent = `Ready (${deviceName})`;
+    if (changed) announce(`Neural voices are ready, running on the ${deviceName}`);
     if (settings.engine === 'kokoro' && reader.current && reader.current.engine !== kokoroEngine && !reader.paused) {
       // Keep the current system-voice message; the next one switches over.
     }
@@ -864,6 +1365,7 @@ function renderKokoroState(state, info) {
     btn.hidden = false;
     btn.textContent = 'Try again';
     status.textContent = `Couldn't load: ${info.error || 'unknown error'}. Using system voices.`;
+    if (changed) announce('Neural voices couldn’t load. System voices are used instead.');
   }
 }
 
@@ -882,8 +1384,8 @@ function renderNicknames() {
       'aria-label': `Nickname for ${login}`,
       onchange: (e) => setNickname(login, e.target.value),
     }),
-    el('button', { class: 'play', type: 'button', title: 'Hear it', onclick: () => previewNickname(login) }, '▶'),
-    el('button', { class: 'x', type: 'button', title: `Remove nickname for ${login}`, onclick: () => setNickname(login, '') }, '×'),
+    el('button', { class: 'play', type: 'button', title: 'Hear it', 'aria-label': `Hear how ${login} is said`, onclick: () => previewNickname(login) }, '▶'),
+    el('button', { class: 'x', type: 'button', title: `Remove nickname for ${login}`, 'aria-label': `Remove the nickname for ${login}`, onclick: () => setNickname(login, '') }, '×'),
   )));
   $('#nicknameEmpty').hidden = rows.length > 0;
 }
@@ -909,6 +1411,7 @@ function editNickname(login) {
   const existing = $(`#nicknameList li[data-login="${CSS.escape(login)}"] input`);
   if (!existing) $('#nickUser').value = login;
   const target = existing || $('#nickName');
+  openSettings('nicknames');
   target.scrollIntoView({ block: 'center', behavior: 'smooth' });
   target.focus({ preventScroll: true });
   target.select();
@@ -961,7 +1464,10 @@ function keyLabel(binding) {
 function renderKeyLabels() {
   for (const node of $$('[data-key-label]')) node.textContent = keyLabel(settings.keys[node.dataset.keyLabel]);
   for (const node of $$('[data-bind]')) {
-    if (!node.classList.contains('capturing')) node.textContent = keyLabel(settings.keys[node.dataset.bind]);
+    const what = node.closest('.keybind').querySelector('span').textContent.trim();
+    const label = keyLabel(settings.keys[node.dataset.bind]);
+    node.setAttribute('aria-label', `${what}: ${label}. Activate, then press the keys you want.`);
+    if (!node.classList.contains('capturing')) node.textContent = label;
   }
 }
 
@@ -1121,7 +1627,6 @@ function startDesktop() {
 
   desktop.onAction(runAction);
 
-  $('#globalHotkeys').checked = settings.globalHotkeys;
   $('#globalHotkeys').addEventListener('change', (e) => {
     settings.globalHotkeys = e.target.checked;
     saveSettings();
@@ -1132,6 +1637,271 @@ function startDesktop() {
   });
 
   syncGlobalHotkeys();
+}
+
+// ---------------------------------------------------------------------------
+// Backup: writing the settings to a file and reading one back
+// ---------------------------------------------------------------------------
+
+const BACKUP_KIND = 'chat-reader-settings';
+const BACKUP_VERSION = 1;
+const LOGIN_RE = /^[a-z0-9_]{1,25}$/;
+
+function backupStatus(text) {
+  $('#backupStatus').textContent = text || '';
+}
+
+function settingsFileName() {
+  return `chat-reader-settings-${new Date().toISOString().slice(0, 10)}.json`;
+}
+
+function settingsFileText() {
+  return JSON.stringify({
+    kind: BACKUP_KIND,
+    version: BACKUP_VERSION,
+    savedAt: new Date().toISOString(),
+    settings,
+  }, null, 2);
+}
+
+async function exportSettings() {
+  const text = settingsFileText();
+  const name = settingsFileName();
+  // The desktop app can show a real save dialog; a browser can only download.
+  if (desktop && desktop.saveFile) {
+    const result = await desktop.saveFile(name, text);
+    if (result.canceled) return;
+    backupStatus(result.error ? `Couldn’t save the file: ${result.error}` : `Saved to ${result.path}.`);
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const link = el('a', { href: url, download: name });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  backupStatus(`Saved ${name} with your downloads.`);
+}
+
+async function importSettings() {
+  if (desktop && desktop.openFile) {
+    const result = await desktop.openFile();
+    if (result.canceled) return;
+    if (result.error) {
+      backupStatus(`Couldn’t open the file: ${result.error}`);
+      return;
+    }
+    applyImportedText(result.text, result.name);
+    return;
+  }
+  $('#importFile').click();
+}
+
+async function readImportedFile(file) {
+  try {
+    applyImportedText(await file.text(), file.name);
+  } catch (err) {
+    backupStatus(`Couldn’t read that file: ${err.message}`);
+  }
+}
+
+function applyImportedText(text, name) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    backupStatus('That isn’t a Chat Reader backup: the file isn’t valid JSON.');
+    return;
+  }
+  // Both a file written here and a bare settings object are accepted.
+  const raw = data && typeof data === 'object' && data.settings && typeof data.settings === 'object' ? data.settings : data;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    backupStatus('That file doesn’t hold any settings.');
+    return;
+  }
+  const { clean, kept } = sanitizeSettings(raw);
+  if (!kept) {
+    backupStatus('Nothing in that file looked like a Chat Reader setting, so nothing changed.');
+    return;
+  }
+  Object.assign(settings, clean);
+  saveSettings();
+  applyAllSettings();
+  backupStatus(`Loaded ${kept} setting${kept === 1 ? '' : 's'}${name ? ` from ${name}` : ''}.`);
+}
+
+function resetSettings() {
+  const sure = confirm('Put every setting back to the way it started? Nicknames, chosen voices and shortcuts are cleared too. This can’t be undone.');
+  if (!sure) return;
+  Object.assign(settings, cloneDefaults());
+  saveSettings();
+  applyAllSettings();
+  backupStatus('Every setting is back to its default.');
+}
+
+// A file can hold anything, so each setting is only taken over when it still
+// looks like what it should be. Anything else keeps the value it has.
+const accept = {
+  bool: (v) => (typeof v === 'boolean' ? v : undefined),
+  oneOf: (...allowed) => (v) => (allowed.includes(v) ? v : undefined),
+  int: (min, max) => (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : undefined),
+  number: (min, max) => (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : undefined),
+  text: (max) => (v) => (typeof v === 'string' && v.length <= max ? v : undefined),
+  ids: (max, allowed) => (v) => (Array.isArray(v)
+    ? v.filter((x) => typeof x === 'string' && x.length <= 160 && (!allowed || allowed.has(x))).slice(0, max)
+    : undefined),
+  logins: (max, value) => (v) => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+    const out = {};
+    for (const [key, raw] of Object.entries(v).slice(0, max)) {
+      const login = normalizeLogin(key);
+      const clean = value(raw);
+      if (LOGIN_RE.test(login) && clean !== undefined && clean !== '') out[login] = clean;
+    }
+    return out;
+  },
+};
+
+function acceptKeys(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const out = { ...DEFAULTS.keys };
+  for (const action of Object.keys(DEFAULTS.keys)) {
+    if (!(action in value)) continue;
+    const binding = value[action];
+    if (binding === null) { out[action] = null; continue; }   // cleared on purpose
+    if (!binding || typeof binding !== 'object') continue;
+    if (typeof binding.code !== 'string' || !/^[A-Za-z0-9]{1,24}$/.test(binding.code)) continue;
+    out[action] = { code: binding.code, ctrl: !!binding.ctrl, alt: !!binding.alt, shift: !!binding.shift, meta: !!binding.meta };
+  }
+  return out;
+}
+
+function acceptUserVoices(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const perEngine = (v) => accept.logins(2000, accept.text(160))(v) || {};
+  return { kokoro: perEngine(value.kokoro), system: perEngine(value.system) };
+}
+
+function acceptRewards(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const out = {};
+  for (const [id, reward] of Object.entries(value).slice(0, 100)) {
+    if (!/^[0-9a-f-]{8,64}$/i.test(id) || !reward || typeof reward !== 'object') continue;
+    if (!(reward.action in REWARD_ACTIONS)) continue;
+    const name = accept.text(60)(reward.name);
+    out[id.toLowerCase()] = { name: (name && name.trim()) || REWARD_ACTIONS[reward.action].name, action: reward.action };
+  }
+  return out;
+}
+
+const SETTING_CHECKS = {
+  channel: (v) => (typeof v === 'string' ? (TwitchChat.normalizeChannel(v) || '') : undefined),
+  theme: accept.oneOf('auto', 'light', 'dark'),
+  uiScale: (v) => {
+    const n = accept.int(UI_SCALES[0], UI_SCALES[UI_SCALES.length - 1])(v);
+    if (n === undefined) return undefined;
+    return UI_SCALES.reduce((best, scale) => (Math.abs(scale - n) < Math.abs(best - n) ? scale : best));
+  },
+  highContrast: accept.bool,
+  reduceMotion: accept.bool,
+  announce: accept.bool,
+  engine: accept.oneOf('kokoro', 'system'),
+  kokoroMode: accept.oneOf('auto', 'webgpu', 'wasm'),
+  kokoroVoices: accept.ids(KOKORO_VOICES.length, new Set(KOKORO_VOICES.map((v) => v.id))),
+  // Voice ids differ from computer to computer, so they're kept as they come
+  // and filtered against what exists when the pool is built.
+  systemVoices: (v) => (v === null ? null : accept.ids(500)(v)),
+  systemLang: (v) => (typeof v === 'string' && /^([a-z]{2}|all)$/i.test(v) ? v.toLowerCase() : undefined),
+  varyVoices: accept.bool,
+  volume: accept.int(0, 100),
+  rate: accept.number(0.6, 2),
+  nameFormat: accept.oneOf('colon', 'says', 'none'),
+  collapseNames: accept.bool,
+  quoteParent: accept.bool,
+  readEvents: accept.bool,
+  readEmojis: accept.bool,
+  emoteMode: accept.oneOf('skip-all', 'skip-twitch', 'read'),
+  readEmoteOnly: accept.bool,
+  maxLength: accept.int(20, 500),
+  catchUp: accept.int(0, 500),
+  skipCommands: accept.bool,
+  skipLinks: accept.bool,
+  ignoredUsers: accept.text(4000),
+  keys: acceptKeys,
+  mediaKeys: accept.bool,
+  globalHotkeys: accept.bool,
+  userVoices: acceptUserVoices,
+  nicknames: accept.logins(500, accept.text(60)),
+  cheerAnnounce: accept.bool,
+  cheerPriority: accept.int(0, 1000000),
+  cheerEffects: accept.int(0, 1000000),
+  highlightPriority: accept.bool,
+  voiceCommand: (v) => (typeof v === 'string' && v.length <= 60 ? cleanCommand(v) : undefined),
+  voiceCommandWho: accept.oneOf('everyone', 'subs', 'vips', 'mods', 'off'),
+  voiceConfirm: accept.bool,
+  modCommand: (v) => (typeof v === 'string' && v.length <= 60 ? cleanCommand(v) : undefined),
+  modCommandWho: accept.oneOf('mods', 'vips', 'off'),
+  rewards: acceptRewards,
+};
+
+function sanitizeSettings(raw) {
+  const clean = {};
+  let kept = 0;
+  for (const [key, validate] of Object.entries(SETTING_CHECKS)) {
+    if (!(key in raw)) continue;
+    const value = validate(raw[key]);
+    if (value === undefined) continue;
+    clean[key] = value;
+    kept++;
+  }
+  return { clean, kept };
+}
+
+// Put the settings into the controls. The one place that knows how, so
+// starting up, importing a file and resetting all go through it.
+function syncControlsFromSettings() {
+  $('#channelInput').value = settings.channel;
+  $('#theme').value = settings.theme;
+  $('#uiScale').value = String(settings.uiScale);
+  $('#volume').value = settings.volume;
+  $('#volume').setAttribute('aria-valuetext', `${settings.volume} percent`);
+  $('#volumeOut').textContent = `${settings.volume}%`;
+  renderRate();
+  $('#kokoroMode').value = settings.kokoroMode;
+  $('#nameFormat').value = settings.nameFormat;
+  $('#emoteMode').value = settings.emoteMode;
+  $('#ignoredUsers').value = settings.ignoredUsers;
+  for (const key of NUMBER_SETTINGS) $(`#${key}`).value = settings[key];
+  for (const key of ['voiceCommand', 'modCommand', 'voiceCommandWho', 'modCommandWho']) $(`#${key}`).value = settings[key];
+  for (const key of [...CHECKBOX_SETTINGS, 'readEmoteOnly', 'mediaKeys', 'globalHotkeys']) {
+    $(`#${key}`).checked = !!settings[key];
+  }
+}
+
+function renderRate() {
+  const rate = Number(settings.rate);
+  $('#rate').value = rate;
+  $('#rate').setAttribute('aria-valuetext', `${rate.toFixed(2)} times normal speed`);
+  $('#rateOut').textContent = `${rate.toFixed(2)}×`;
+}
+
+// Everything that has to happen when the settings change wholesale.
+function applyAllSettings() {
+  applyAppearance();
+  syncControlsFromSettings();
+  renderLanguageOptions();
+  renderEngineUI();
+  renderKeyLabels();
+  renderNicknames();
+  renderRewards();
+  renderCommandHints();
+  renderEmoteStatus();
+  loadThirdPartyEmotes();
+  refreshSpeechBodies();
+  refreshVoiceTags();
+  renderNow();
+  syncGlobalHotkeys();
+  enableMediaKeys(settings.mediaKeys);
 }
 
 // ---------------------------------------------------------------------------
@@ -1175,20 +1945,12 @@ $('#pauseBtn').addEventListener('click', () => { userGesture(); togglePause(); }
 $('#skipBtn').addEventListener('click', skipCurrent);
 $('#clearBtn').addEventListener('click', clearQueue);
 
-$('#volume').value = settings.volume;
-$('#volumeOut').textContent = `${settings.volume}%`;
 $('#volume').addEventListener('input', (e) => setVolume(Number(e.target.value), { live: true }));
 $('#volume').addEventListener('change', () => {
   if (reader.controller && reader.current.engine === systemEngine) reader.controller.volumeChanged();
 });
 
-$('#rate').value = settings.rate;
-$('#rateOut').textContent = `${Number(settings.rate).toFixed(2)}×`;
-$('#rate').addEventListener('input', (e) => {
-  settings.rate = Number(e.target.value);
-  $('#rateOut').textContent = `${settings.rate.toFixed(2)}×`;
-  saveSettings();
-});
+$('#rate').addEventListener('input', (e) => setRate(Number(e.target.value)));
 
 for (const radio of $$('input[name="engine"]')) {
   radio.addEventListener('change', () => {
@@ -1202,7 +1964,6 @@ for (const radio of $$('input[name="engine"]')) {
   });
 }
 
-$('#kokoroMode').value = settings.kokoroMode;
 $('#kokoroMode').addEventListener('change', (e) => {
   settings.kokoroMode = e.target.value;
   saveSettings();
@@ -1253,17 +2014,41 @@ $('#poolAll').addEventListener('click', () => {
   refreshVoiceTags();
 });
 
-const checkboxSettings = ['varyVoices', 'collapseNames', 'quoteParent', 'readEvents', 'readEmojis', 'skipCommands', 'skipLinks'];
-for (const key of checkboxSettings) {
+for (const key of CHECKBOX_SETTINGS) {
   const input = $(`#${key}`);
-  input.checked = !!settings[key];
-  input.addEventListener('change', () => { settings[key] = input.checked; saveSettings(); });
+  input.addEventListener('change', () => {
+    settings[key] = input.checked;
+    saveSettings();
+    if (APPEARANCE_SETTINGS.includes(key)) {
+      applyAppearance();
+      renderNow();   // the chatter's own name colour is dropped in high contrast
+    }
+  });
 }
 
-$('#nameFormat').value = settings.nameFormat;
+$('#theme').addEventListener('change', (e) => {
+  settings.theme = e.target.value;
+  saveSettings();
+  applyAppearance();
+});
+
+$('#uiScale').addEventListener('change', (e) => {
+  settings.uiScale = Number(e.target.value);
+  saveSettings();
+  applyAppearance();
+});
+
+$('#exportBtn').addEventListener('click', exportSettings);
+$('#importBtn').addEventListener('click', importSettings);
+$('#importFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';   // so picking the same file twice works
+  if (file) readImportedFile(file);
+});
+$('#resetBtn').addEventListener('click', resetSettings);
+
 $('#nameFormat').addEventListener('change', (e) => { settings.nameFormat = e.target.value; saveSettings(); });
 
-$('#emoteMode').value = settings.emoteMode;
 $('#emoteMode').addEventListener('change', (e) => {
   settings.emoteMode = e.target.value;
   saveSettings();
@@ -1272,7 +2057,6 @@ $('#emoteMode').addEventListener('change', (e) => {
   renderNow();
 });
 
-$('#readEmoteOnly').checked = settings.readEmoteOnly;
 $('#readEmoteOnly').addEventListener('change', (e) => {
   settings.readEmoteOnly = e.target.checked;
   saveSettings();
@@ -1281,9 +2065,8 @@ $('#readEmoteOnly').addEventListener('change', (e) => {
 });
 renderEmoteStatus();
 
-for (const key of ['maxLength', 'catchUp']) {
+for (const key of NUMBER_SETTINGS) {
   const input = $(`#${key}`);
-  input.value = settings[key];
   input.addEventListener('change', () => {
     const n = Math.max(Number(input.min), Math.min(Number(input.max), Math.round(Number(input.value) || 0)));
     settings[key] = n;
@@ -1292,7 +2075,6 @@ for (const key of ['maxLength', 'catchUp']) {
   });
 }
 
-$('#ignoredUsers').value = settings.ignoredUsers;
 $('#ignoredUsers').addEventListener('input', (e) => { settings.ignoredUsers = e.target.value; saveSettings(); });
 
 for (const button of $$('[data-bind]')) {
@@ -1300,7 +2082,6 @@ for (const button of $$('[data-bind]')) {
 }
 document.addEventListener('click', (e) => { if (capturing && !e.target.closest('[data-bind]')) stopCapture(); });
 
-$('#mediaKeys').checked = settings.mediaKeys;
 $('#mediaKeys').addEventListener('change', (e) => {
   settings.mediaKeys = e.target.checked;
   saveSettings();
@@ -1332,6 +2113,13 @@ $('#testBtn').addEventListener('click', () => {
       speechBody: displayText,
       receivedAt: now + i,
     });
+  });
+  // A cheer goes through the same path as a real one, effect word and all.
+  const bits = Math.max(100, settings.cheerEffects);
+  handlePrivmsg({
+    tags: { id: `test-${now}-cheer`, login: 'bitbaron', 'display-name': 'BitBaron', color: '#B57EDC', 'user-id': 'bitbaron', bits: String(bits) },
+    prefix: 'bitbaron!bitbaron@bitbaron.tmi.twitch.tv',
+    params: ['#test', `Cheer${bits} ${settings.cheerEffects > 0 ? 'chipmunk ' : ''}take my bits, you earned them`],
   });
 });
 
@@ -1366,10 +2154,14 @@ if (systemEngine.supported) {
 // ---------------------------------------------------------------------------
 
 startDesktop();
+applyAppearance();
+syncControlsFromSettings();
 renderLanguageOptions();
 renderEngineUI();
 renderKeyLabels();
 renderNicknames();
+renderRewards();
+renderCommandHints();
 renderNow();
 
 {
@@ -1380,5 +2172,6 @@ renderNow();
     // Browsers block audio until the page is clicked, so ask once.
     $('#gateChannel').textContent = `#${fromUrl}`;
     $('#gate').hidden = false;
+    $('#gateBtn').focus();
   }
 }

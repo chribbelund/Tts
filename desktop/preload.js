@@ -26,6 +26,10 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
   // Keeps the tray menu and tooltip in step with the reader.
   setState: (state) => ipcRenderer.send('state:update', state),
 
+  // A real save / open dialog, which the page can't put up on its own.
+  saveFile: (name, text) => ipcRenderer.invoke('settings:save', { name, text }),
+  openFile: () => ipcRenderer.invoke('settings:open'),
+
   toggleWindow: () => ipcRenderer.send('window:toggle'),
   hideWindow: () => ipcRenderer.send('window:hide'),
   openExternal: (url) => ipcRenderer.send('shell:open-external', url),

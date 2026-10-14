@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Notification, Tray, globalShortcut, ipcMain, nativeImage, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, globalShortcut, ipcMain, nativeImage, shell, systemPreferences } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { toAccelerator, isMediaKey } = require('./accelerator');
@@ -71,17 +71,48 @@ function createWindow() {
   });
 
   // Closing the window would kill the page, and the page is what reads chat.
-  // Hide it instead and leave the reader running; the tray and the hotkeys
-  // bring it back.
+  // Ask whether to hide it into the tray and keep reading, or to quit; the
+  // tray and the hotkeys bring it back.
   win.on('close', (event) => {
     if (quitting) return;
     event.preventDefault();
-    win.hide();
-    if (IS_MAC) app.dock?.hide();
-    notifyStillRunning();
+    confirmClose();
   });
 
   win.on('closed', () => { win = null; });
+}
+
+let askingToClose = false;
+
+async function confirmClose() {
+  // A second click on ✕ while the box is up shouldn't stack another one.
+  if (askingToClose || !win || win.isDestroyed()) return;
+  askingToClose = true;
+  try {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'question',
+      title: 'Chat Reader',
+      message: 'Minimize Chat Reader to the system tray?',
+      detail: IS_MAC
+        ? 'It keeps reading chat from the menu bar. Choose Quit to stop it.'
+        : 'It keeps reading chat from the system tray. Choose Quit to stop it.',
+      buttons: ['Minimize to tray', 'Quit', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    });
+    if (response === 0) hideToTray();
+    else if (response === 1) { quitting = true; app.quit(); }
+  } finally {
+    askingToClose = false;
+  }
+}
+
+function hideToTray() {
+  if (!win || win.isDestroyed()) return;
+  win.hide();
+  if (IS_MAC) app.dock?.hide();
+  notifyStillRunning();
 }
 
 function showWindow() {
@@ -94,9 +125,7 @@ function showWindow() {
 
 function toggleWindow() {
   if (win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) {
-    win.hide();
-    if (IS_MAC) app.dock?.hide();
-    notifyStillRunning();
+    hideToTray();
   } else {
     showWindow();
   }
@@ -244,6 +273,15 @@ function buildMenu() {
         { label: 'Clear waiting messages', click: () => sendAction('clear') },
       ],
     },
+    {
+      label: 'Settings',
+      submenu: [
+        { label: 'Open settings…', accelerator: 'CmdOrCtrl+,', click: () => sendAction('openSettings') },
+        { type: 'separator' },
+        { label: 'Save settings to a file…', accelerator: 'CmdOrCtrl+S', click: () => sendAction('exportSettings') },
+        { label: 'Load settings from a file…', accelerator: 'CmdOrCtrl+O', click: () => sendAction('importSettings') },
+      ],
+    },
     { role: 'viewMenu' },
     { role: 'windowMenu' },
     {
@@ -289,6 +327,44 @@ ipcMain.on('state:update', (_event, state) => {
   renderTray();
 });
 
+// Saving and loading the settings file. The page hands over the text and gets
+// back where it went, so the dialogs are the OS's own.
+const SETTINGS_FILTERS = [{ name: 'Chat Reader settings', extensions: ['json'] }];
+const MAX_SETTINGS_BYTES = 4 * 1024 * 1024;
+
+ipcMain.handle('settings:save', async (_event, { name, text } = {}) => {
+  const suggested = path.basename(String(name || 'chat-reader-settings.json'));
+  const { canceled, filePath } = await dialog.showSaveDialog(win && !win.isDestroyed() ? win : null, {
+    title: 'Save Chat Reader settings',
+    defaultPath: path.join(app.getPath('documents'), suggested),
+    filters: SETTINGS_FILTERS,
+  });
+  if (canceled || !filePath) return { canceled: true };
+  try {
+    await fs.promises.writeFile(filePath, String(text ?? ''), 'utf8');
+    return { path: filePath };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('settings:open', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : null, {
+    title: 'Load Chat Reader settings',
+    properties: ['openFile'],
+    filters: SETTINGS_FILTERS,
+  });
+  const file = filePaths && filePaths[0];
+  if (canceled || !file) return { canceled: true };
+  try {
+    const { size } = await fs.promises.stat(file);
+    if (size > MAX_SETTINGS_BYTES) return { error: 'that file is far too big to be a settings file' };
+    return { name: path.basename(file), text: await fs.promises.readFile(file, 'utf8') };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
 ipcMain.on('window:toggle', toggleWindow);
-ipcMain.on('window:hide', () => { if (win && !win.isDestroyed()) { win.hide(); if (IS_MAC) app.dock?.hide(); notifyStillRunning(); } });
+ipcMain.on('window:hide', hideToTray);
 ipcMain.on('shell:open-external', (_event, url) => { if (/^https?:\/\//.test(String(url))) shell.openExternal(String(url)); });

@@ -11,213 +11,333 @@
 </head>
 <body>
 
+<nav class="skip-links" aria-label="Skip links">
+  <a class="skip-link" href="#nowPanel">Skip to the player</a>
+  <a class="skip-link" href="#feed">Skip to chat</a>
+</nav>
+
 <header class="topbar">
-  <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Chat Reader</div>
+  <h1 class="brand"><span class="brand-mark" aria-hidden="true"></span>Chat Reader</h1>
   <form id="connectForm" class="connect" autocomplete="off">
-    <input id="channelInput" placeholder="Channel name or twitch.tv link" spellcheck="false" aria-label="Twitch channel">
+    <label class="sr-only" for="channelInput">Twitch channel</label>
+    <input id="channelInput" placeholder="Channel name or twitch.tv link" spellcheck="false">
     <button id="connectBtn" type="submit" class="btn primary">Connect</button>
   </form>
-  <div id="status" class="status" data-state="idle"><span class="dot"></span><span id="statusText">Not connected</span></div>
+  <div id="status" class="status" data-state="idle" role="status"><span class="dot" aria-hidden="true"></span><span id="statusText">Not connected</span></div>
+  <button id="settingsBtn" type="button" class="btn icon-btn" aria-haspopup="dialog" aria-controls="settingsDialog">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.24-1.12.55-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.3.6.22l2.39-.96c.5.39 1.04.7 1.62.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.24 1.12-.55 1.62-.94l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>
+    <span>Settings</span>
+  </button>
 </header>
 
 <main class="layout">
-  <div class="col-main">
+  <section class="panel now" id="nowPanel" data-state="idle" tabindex="-1" aria-labelledby="nowHeading">
+    <h2 class="sr-only" id="nowHeading">Player</h2>
+    <div class="now-top">
+      <button id="pauseBtn" class="pause-btn" aria-pressed="false" aria-label="Pause reading" title="Pause / resume">
+        <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="4.5" width="4" height="15" rx="1.2"/><rect x="14" y="4.5" width="4" height="15" rx="1.2"/></svg>
+        <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4.8v14.4a1 1 0 0 0 1.5.86l11.3-7.2a1 1 0 0 0 0-1.72L9.5 3.94A1 1 0 0 0 8 4.8z"/></svg>
+      </button>
+      <div class="now-body">
+        <div class="now-label"><span id="nowLabel">Idle</span><span class="sep" aria-hidden="true">·</span><span id="queueCount">0 waiting</span></div>
+        <div class="now-msg" id="nowMsg"><span class="muted">Nothing is being read right now.</span></div>
+        <div class="progress" id="nowProgress" role="progressbar" aria-label="Progress through the message" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="nowBar"></i></div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="btn-row">
+        <button id="skipBtn" class="btn">Skip</button>
+        <button id="clearBtn" class="btn">Clear queue</button>
+      </div>
+      <label class="slider">
+        <span>Volume</span>
+        <input type="range" id="volume" min="0" max="100" step="1">
+        <output id="volumeOut" for="volume">80%</output>
+      </label>
+      <label class="slider">
+        <span>Speed</span>
+        <input type="range" id="rate" min="0.6" max="2" step="0.05">
+        <output id="rateOut" for="rate">1.00×</output>
+      </label>
+    </div>
+    <div class="now-foot">
+      <div class="key-hint">Pause/resume <kbd data-key-label="pause"></kbd> <span class="sep" aria-hidden="true">·</span> Skip <kbd data-key-label="skip"></kbd></div>
+      <button type="button" id="voiceChip" class="voice-chip" data-state="unloaded">
+        <span class="dot" aria-hidden="true"></span><span id="voiceChipText">Voices</span>
+      </button>
+    </div>
+  </section>
 
-    <section class="panel now" id="nowPanel" data-state="idle">
-      <div class="now-top">
-        <button id="pauseBtn" class="pause-btn" aria-pressed="false" title="Pause / resume">
-          <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="4.5" width="4" height="15" rx="1.2"/><rect x="14" y="4.5" width="4" height="15" rx="1.2"/></svg>
-          <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4.8v14.4a1 1 0 0 0 1.5.86l11.3-7.2a1 1 0 0 0 0-1.72L9.5 3.94A1 1 0 0 0 8 4.8z"/></svg>
-        </button>
-        <div class="now-body">
-          <div class="now-label"><span id="nowLabel">Idle</span><span class="sep">·</span><span id="queueCount">0 waiting</span></div>
-          <div class="now-msg" id="nowMsg"><span class="muted">Nothing is being read right now.</span></div>
-          <div class="progress"><i id="nowBar"></i></div>
-        </div>
-      </div>
-      <div class="controls">
-        <div class="btn-row">
-          <button id="skipBtn" class="btn">Skip</button>
-          <button id="clearBtn" class="btn">Clear queue</button>
-        </div>
-        <label class="slider">
-          <span>Volume</span>
-          <input type="range" id="volume" min="0" max="100" step="1">
-          <output id="volumeOut">80%</output>
-        </label>
-        <label class="slider">
-          <span>Speed</span>
-          <input type="range" id="rate" min="0.6" max="2" step="0.05">
-          <output id="rateOut">1.00×</output>
-        </label>
-      </div>
-      <div class="key-hint">Pause/resume <kbd data-key-label="pause"></kbd> <span class="sep">·</span> Skip <kbd data-key-label="skip"></kbd></div>
-    </section>
-
-    <section class="panel feed-panel">
-      <div class="feed-head">
-        <h2>Chat</h2>
-        <button id="testBtn" class="btn ghost small">Add test messages</button>
-      </div>
-      <ol id="feed" class="feed" aria-live="off"></ol>
-      <div id="feedEmpty" class="empty">Enter a channel above and press Connect. Messages show up here as they arrive and are read in order.</div>
-    </section>
-  </div>
-
-  <aside class="col-side">
-    <section class="panel settings">
-      <h2>Voices</h2>
-
-      <div class="field">
-        <div class="seg" role="radiogroup" aria-label="Voice engine">
-          <label><input type="radio" name="engine" value="kokoro"><span>Neural</span></label>
-          <label><input type="radio" name="engine" value="system"><span>System</span></label>
-        </div>
-        <p class="hint" id="engineHint"></p>
-      </div>
-
-      <div id="kokoroBox" class="field">
-        <label class="row-label" for="kokoroMode">Neural model</label>
-        <select id="kokoroMode">
-          <option value="auto">Auto (GPU if available)</option>
-          <option value="webgpu">GPU · fastest · 326 MB</option>
-          <option value="wasm">CPU · 92 MB</option>
-        </select>
-        <div id="gpuWarning" class="warn" role="status" hidden>
-          <strong id="gpuWarningTitle"></strong>
-          <p id="gpuWarningText"></p>
-          <p id="gpuWarningFix"></p>
-          <div id="gpuWarningCopy" class="warn-copy" hidden>
-            <code id="gpuSettingsUrl"></code>
-            <button type="button" class="btn small" id="gpuCopyBtn">Copy</button>
-          </div>
-        </div>
-        <div class="load-row">
-          <button id="kokoroLoadBtn" class="btn small">Load neural voices</button>
-          <span id="kokoroStatus" class="hint"></span>
-        </div>
-        <div class="progress thin" id="kokoroProgressWrap" hidden><i id="kokoroProgress"></i></div>
-      </div>
-
-      <div id="systemBox" class="field">
-        <label class="row-label" for="systemLang">Language</label>
-        <select id="systemLang"></select>
-      </div>
-
-      <div class="field">
-        <div class="row-label with-actions">
-          <span>Voice pool <span class="hint" id="poolCount"></span></span>
-          <span class="mini-actions">
-            <button type="button" class="link" id="poolBest">Best</button>
-            <button type="button" class="link" id="poolAll">All</button>
-          </span>
-        </div>
-        <ul id="voiceList" class="voice-list"></ul>
-        <p class="hint">Each chatter keeps the same voice. Click the voice tag on a message to give that chatter another one.</p>
-      </div>
-
-      <label class="check"><input type="checkbox" id="varyVoices"> Vary pitch and pace a little per chatter</label>
-
-      <h2>Reading</h2>
-      <div class="field">
-        <label class="row-label" for="nameFormat">Names</label>
-        <select id="nameFormat">
-          <option value="colon">“Name: message”</option>
-          <option value="says">“Name says message”</option>
-          <option value="none">Message only</option>
-        </select>
-      </div>
-      <label class="check"><input type="checkbox" id="collapseNames"> Don’t repeat the name for back-to-back messages</label>
-      <label class="check"><input type="checkbox" id="quoteParent"> For replies, also read the message being replied to</label>
-      <label class="check"><input type="checkbox" id="readEvents"> Read subs, raids and announcements</label>
-      <label class="check"><input type="checkbox" id="readEmojis"> Read emojis</label>
-      <div class="field">
-        <label class="row-label" for="emoteMode">Emotes</label>
-        <select id="emoteMode">
-          <option value="skip-all">Skip emotes, third-party ones too</option>
-          <option value="skip-twitch">Skip Twitch emotes only</option>
-          <option value="read">Read emote names out loud</option>
-        </select>
-        <label class="check" id="readEmoteOnlyRow"><input type="checkbox" id="readEmoteOnly"> Still read a message that is nothing but emotes</label>
-        <p class="hint" id="emoteHint"></p>
-      </div>
-      <div class="field inline">
-        <label for="maxLength">Cut messages after</label>
-        <input type="number" id="maxLength" min="20" max="500" step="10"> <span class="hint">characters</span>
-      </div>
-      <div class="field inline">
-        <label for="catchUp">Skip old messages when more than</label>
-        <input type="number" id="catchUp" min="0" max="500" step="1"> <span class="hint">waiting (0 = read everything)</span>
-      </div>
-
-      <h2>Nicknames</h2>
-      <p class="hint">Say a different name for a chatter, in their messages, in replies and in @mentions. Click a name in chat to add it here.</p>
-      <ul id="nicknameList" class="nick-list"></ul>
-      <p id="nicknameEmpty" class="hint nick-empty">No nicknames yet.</p>
-      <form id="nicknameForm" class="nick-add" autocomplete="off" novalidate>
-        <input id="nickUser" placeholder="Twitch username" spellcheck="false" aria-label="Twitch username">
-        <span class="nick-arrow" aria-hidden="true">→</span>
-        <input id="nickName" placeholder="Say as" spellcheck="false" aria-label="Nickname">
-        <button type="submit" class="btn small">Add</button>
-      </form>
-
-      <h2>Filters</h2>
-      <label class="check"><input type="checkbox" id="skipCommands"> Skip bot commands (starting with !)</label>
-      <label class="check"><input type="checkbox" id="skipLinks"> Skip messages with links</label>
-      <div class="field">
-        <label class="row-label" for="ignoredUsers">Ignored chatters</label>
-        <textarea id="ignoredUsers" rows="2" spellcheck="false" placeholder="e.g. streamerbot, sery_bot"></textarea>
-      </div>
-
-      <h2>Keys</h2>
-      <div class="field keybind">
-        <span>Pause / resume</span>
-        <button type="button" class="btn small keycap" data-bind="pause"></button>
-        <small class="hotkey-note" hidden></small>
-      </div>
-      <div class="field keybind">
-        <span>Skip message</span>
-        <button type="button" class="btn small keycap" data-bind="skip"></button>
-        <small class="hotkey-note" hidden></small>
-      </div>
-      <div class="field keybind">
-        <span>Volume up</span>
-        <button type="button" class="btn small keycap" data-bind="volumeUp"></button>
-        <small class="hotkey-note" hidden></small>
-      </div>
-      <div class="field keybind">
-        <span>Volume down</span>
-        <button type="button" class="btn small keycap" data-bind="volumeDown"></button>
-        <small class="hotkey-note" hidden></small>
-      </div>
-      <div class="field keybind">
-        <span>Clear waiting messages</span>
-        <button type="button" class="btn small keycap" data-bind="clear"></button>
-        <small class="hotkey-note" hidden></small>
-      </div>
-      <div class="field keybind desktop-only">
-        <span>Show / hide the window</span>
-        <button type="button" class="btn small keycap" data-bind="toggleWindow"></button>
-        <small class="hotkey-note" hidden></small>
-      </div>
-      <p class="hint">Click a shortcut and press the keys you want. Backspace clears it, Esc keeps the old one.</p>
-
-      <label class="check desktop-only"><input type="checkbox" id="globalHotkeys"> Let these work while another app is focused</label>
-      <label class="check"><input type="checkbox" id="mediaKeys"> Use the keyboard’s ⏯ media key too, for pause and skip</label>
-      <p class="hint browser-only">Normal shortcuts work while this tab is focused. The media key also works while you’re in a game.</p>
-      <p class="hint desktop-only" id="hotkeyStatus"></p>
-      <p class="hint desktop-only" id="accessibilityNote" hidden>
-        macOS only hands the ⏯ key to apps allowed under Privacy &amp; Security → Accessibility.
-        <button type="button" class="btn small" id="accessibilityBtn">Ask for access</button>
-      </p>
-      <p class="hint desktop-only" id="desktopVersion"></p>
-    </section>
-  </aside>
+  <section class="panel feed-panel" aria-labelledby="chatHeading">
+    <div class="feed-head">
+      <h2 id="chatHeading">Chat</h2>
+      <button id="testBtn" class="btn ghost small">Add test messages</button>
+    </div>
+    <ol id="feed" class="feed" tabindex="-1" aria-labelledby="chatHeading" aria-live="off"></ol>
+    <div id="feedEmpty" class="empty">Enter a channel above and press Connect. Messages show up here as they arrive and are read in order.</div>
+  </section>
 </main>
 
-<div id="gate" class="gate" hidden>
+<dialog id="settingsDialog" class="settings-dialog" aria-labelledby="settingsTitle">
+  <div class="dialog-box">
+    <header class="dialog-head">
+      <h2 id="settingsTitle">Settings</h2>
+      <button type="button" class="x close-btn" id="settingsClose" aria-label="Close settings">✕</button>
+    </header>
+    <div class="dialog-body">
+      <div class="tabs" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
+        <button type="button" role="tab" id="tab-display" aria-controls="panel-display" aria-selected="true" tabindex="0" data-tab="display">Display</button>
+        <button type="button" role="tab" id="tab-voices" aria-controls="panel-voices" aria-selected="false" tabindex="-1" data-tab="voices">Voices</button>
+        <button type="button" role="tab" id="tab-reading" aria-controls="panel-reading" aria-selected="false" tabindex="-1" data-tab="reading">Reading</button>
+        <button type="button" role="tab" id="tab-nicknames" aria-controls="panel-nicknames" aria-selected="false" tabindex="-1" data-tab="nicknames">Nicknames</button>
+        <button type="button" role="tab" id="tab-filters" aria-controls="panel-filters" aria-selected="false" tabindex="-1" data-tab="filters">Filters</button>
+        <button type="button" role="tab" id="tab-viewers" aria-controls="panel-viewers" aria-selected="false" tabindex="-1" data-tab="viewers">Viewers (BETA)</button>
+        <button type="button" role="tab" id="tab-keys" aria-controls="panel-keys" aria-selected="false" tabindex="-1" data-tab="keys">Keys</button>
+        <button type="button" role="tab" id="tab-backup" aria-controls="panel-backup" aria-selected="false" tabindex="-1" data-tab="backup">Backup</button>
+      </div>
+      <div class="tab-panels">
+        <section class="tab-panel" role="tabpanel" id="panel-display" aria-labelledby="tab-display" tabindex="0">
+          <div class="field">
+            <label class="row-label" for="theme">Theme</label>
+            <select id="theme">
+              <option value="auto">Match my system</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="row-label" for="uiScale">Size of everything</label>
+            <select id="uiScale">
+              <option value="100">Normal</option>
+              <option value="115">Large · 115%</option>
+              <option value="130">Larger · 130%</option>
+              <option value="150">Very large · 150%</option>
+              <option value="175">Huge · 175%</option>
+              <option value="200">Biggest · 200%</option>
+            </select>
+          </div>
+          <label class="check"><input type="checkbox" id="highContrast"> Stronger contrast and thicker outlines</label>
+          <label class="check"><input type="checkbox" id="reduceMotion"> Stop animations and blinking</label>
+          <label class="check"><input type="checkbox" id="announce"> Say what happened, for screen readers, when reading pauses, skips or the volume changes</label>
+          <p class="hint">New chat messages are not announced, because they are read out loud anyway.</p>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-voices" aria-labelledby="tab-voices" tabindex="0" hidden>
+          <div class="field">
+            <div class="seg" role="radiogroup" aria-label="Voice engine">
+              <label><input type="radio" name="engine" value="kokoro"><span>Neural</span></label>
+              <label><input type="radio" name="engine" value="system"><span>System</span></label>
+            </div>
+            <p class="hint" id="engineHint"></p>
+          </div>
+
+          <div id="kokoroBox" class="field">
+            <label class="row-label" for="kokoroMode">Neural model</label>
+            <select id="kokoroMode">
+              <option value="auto">Auto (GPU if available)</option>
+              <option value="webgpu">GPU · fastest · 326 MB</option>
+              <option value="wasm">CPU · 92 MB</option>
+            </select>
+            <div id="gpuWarning" class="warn" role="status" hidden>
+              <strong id="gpuWarningTitle"></strong>
+              <p id="gpuWarningText"></p>
+              <p id="gpuWarningFix"></p>
+              <div id="gpuWarningCopy" class="warn-copy" hidden>
+                <code id="gpuSettingsUrl"></code>
+                <button type="button" class="btn small" id="gpuCopyBtn">Copy</button>
+              </div>
+            </div>
+            <div class="load-row">
+              <button id="kokoroLoadBtn" class="btn small">Load neural voices</button>
+              <span id="kokoroStatus" class="hint" role="status"></span>
+            </div>
+            <div class="progress thin" id="kokoroProgressWrap" hidden><i id="kokoroProgress"></i></div>
+          </div>
+
+          <div id="systemBox" class="field">
+            <label class="row-label" for="systemLang">Language</label>
+            <select id="systemLang"></select>
+          </div>
+
+          <div class="field">
+            <div class="row-label with-actions" id="poolLabel">
+              <span>Voice pool <span class="hint" id="poolCount"></span></span>
+              <span class="mini-actions">
+                <button type="button" class="link" id="poolBest">Best</button>
+                <button type="button" class="link" id="poolAll">All</button>
+              </span>
+            </div>
+            <ul id="voiceList" class="voice-list" aria-label="Voice pool"></ul>
+            <p class="hint">Each chatter keeps the same voice. Click the voice tag on a message to give that chatter another one.</p>
+          </div>
+
+          <label class="check"><input type="checkbox" id="varyVoices"> Vary pitch and pace a little per chatter</label>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-reading" aria-labelledby="tab-reading" tabindex="0" hidden>
+          <div class="field">
+            <label class="row-label" for="nameFormat">Names</label>
+            <select id="nameFormat">
+              <option value="colon">“Name: message”</option>
+              <option value="says">“Name says message”</option>
+              <option value="none">Message only</option>
+            </select>
+          </div>
+          <label class="check"><input type="checkbox" id="collapseNames"> Don’t repeat the name for back-to-back messages</label>
+          <label class="check"><input type="checkbox" id="quoteParent"> For replies, also read the message being replied to</label>
+          <label class="check"><input type="checkbox" id="readEvents"> Read subs, raids and announcements</label>
+          <label class="check"><input type="checkbox" id="readEmojis"> Read emojis</label>
+          <div class="field">
+            <label class="row-label" for="emoteMode">Emotes</label>
+            <select id="emoteMode">
+              <option value="skip-all">Skip emotes, third-party ones too</option>
+              <option value="skip-twitch">Skip Twitch emotes only</option>
+              <option value="read">Read emote names out loud</option>
+            </select>
+            <label class="check" id="readEmoteOnlyRow"><input type="checkbox" id="readEmoteOnly"> Still read a message that is nothing but emotes</label>
+            <p class="hint" id="emoteHint"></p>
+          </div>
+          <div class="field inline">
+            <label for="maxLength">Cut messages after</label>
+            <input type="number" id="maxLength" min="20" max="500" step="10"> <span class="hint">characters</span>
+          </div>
+          <div class="field inline">
+            <label for="catchUp">Skip old messages when more than</label>
+            <input type="number" id="catchUp" min="0" max="500" step="1"> <span class="hint">waiting (0 = read everything)</span>
+          </div>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-nicknames" aria-labelledby="tab-nicknames" tabindex="0" hidden>
+          <p class="hint">Say a different name for a chatter, in their messages, in replies and in @mentions. Click a name in chat to add it here.</p>
+          <ul id="nicknameList" class="nick-list" aria-label="Nicknames"></ul>
+          <p id="nicknameEmpty" class="hint nick-empty">No nicknames yet.</p>
+          <form id="nicknameForm" class="nick-add" autocomplete="off" novalidate>
+            <input id="nickUser" placeholder="Twitch username" spellcheck="false" aria-label="Twitch username">
+            <span class="nick-arrow" aria-hidden="true">→</span>
+            <input id="nickName" placeholder="Say as" spellcheck="false" aria-label="Say this name instead">
+            <button type="submit" class="btn small">Add</button>
+          </form>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-filters" aria-labelledby="tab-filters" tabindex="0" hidden>
+          <label class="check"><input type="checkbox" id="skipCommands"> Skip bot commands (starting with !)</label>
+          <label class="check"><input type="checkbox" id="skipLinks"> Skip messages with links</label>
+          <div class="field">
+            <label class="row-label" for="ignoredUsers">Ignored chatters</label>
+            <textarea id="ignoredUsers" rows="2" spellcheck="false" placeholder="e.g. streamerbot, sery_bot"></textarea>
+          </div>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-viewers" aria-labelledby="tab-viewers" tabindex="0" hidden>
+          <p class="hint">Let your viewers change how chat is read, with bits, channel points and chat commands. This page only reads chat, so it can’t answer there; viewers hear what changed instead.</p>
+
+          <h3 class="sub-head">Bits</h3>
+          <label class="check"><input type="checkbox" id="cheerAnnounce"> Say who cheered and how many bits</label>
+          <div class="field inline">
+            <label for="cheerPriority">Cheers of at least</label>
+            <input type="number" id="cheerPriority" min="0" max="1000000" step="50"> <span class="hint">bits are read before everything else (0 = off)</span>
+          </div>
+          <div class="field inline">
+            <label for="cheerEffects">Cheers of at least</label>
+            <input type="number" id="cheerEffects" min="0" max="1000000" step="50"> <span class="hint">bits can pick a voice effect (0 = off)</span>
+          </div>
+          <p class="hint">The effect is the first word after the cheer: <code>Cheer200 robot hello chat</code>. Effects: chipmunk, giant, robot and echo. Robot and echo need neural voices; system voices only change pitch.</p>
+
+          <h3 class="sub-head">Channel points</h3>
+          <p class="hint">Twitch only shows a redemption in chat when the reward asks the viewer to type something, so turn on <em>Require Viewer to Enter Text</em> for these rewards in your Twitch dashboard.</p>
+          <ul id="rewardList" class="reward-list" aria-label="Linked rewards"></ul>
+          <p id="rewardEmpty" class="hint nick-empty">No rewards linked yet.</p>
+          <div class="reward-add">
+            <label class="row-label" for="rewardAction">When the reward is redeemed</label>
+            <select id="rewardAction"></select>
+            <button type="button" class="btn small" id="rewardLinkBtn">Link the next redemption</button>
+          </div>
+          <p class="hint" id="rewardStatus" role="status"></p>
+          <label class="check"><input type="checkbox" id="highlightPriority"> Read “Highlight My Message” redemptions before everything else</label>
+
+          <h3 class="sub-head">Chat commands</h3>
+          <div class="command-row">
+            <label for="voiceCommand">Pick your own voice</label>
+            <input id="voiceCommand" spellcheck="false" autocomplete="off">
+            <select id="voiceCommandWho" aria-label="Who can pick their own voice">
+              <option value="everyone">Everyone</option>
+              <option value="subs">Subscribers</option>
+              <option value="vips">VIPs</option>
+              <option value="mods">Mods</option>
+              <option value="off">Nobody</option>
+            </select>
+          </div>
+          <p class="hint"><code><span data-command="voiceCommand"></span> Bella</code> picks a voice from your pool by name; <code data-command="voiceCommand"></code> on its own moves to the next one. The choice is kept, like clicking a voice tag.</p>
+          <label class="check"><input type="checkbox" id="voiceConfirm"> Say “… now sounds like this” in the new voice</label>
+          <div class="command-row">
+            <label for="modCommand">Control the reader</label>
+            <input id="modCommand" spellcheck="false" autocomplete="off">
+            <select id="modCommandWho" aria-label="Who can control the reader">
+              <option value="mods">Mods</option>
+              <option value="vips">Mods and VIPs</option>
+              <option value="off">Nobody</option>
+            </select>
+          </div>
+          <p class="hint">Followed by <code>skip</code>, <code>pause</code>, <code>resume</code>, <code>clear</code>, <code>volume 40</code> or <code>speed 1.2</code> (<code>volume +10</code> works too). You, as the broadcaster, can always use it unless it’s set to Nobody.</p>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-keys" aria-labelledby="tab-keys" tabindex="0" hidden>
+          <div class="field keybind">
+            <span id="bind-pause">Pause / resume</span>
+            <button type="button" class="btn small keycap" data-bind="pause"></button>
+            <small class="hotkey-note" hidden></small>
+          </div>
+          <div class="field keybind">
+            <span id="bind-skip">Skip message</span>
+            <button type="button" class="btn small keycap" data-bind="skip"></button>
+            <small class="hotkey-note" hidden></small>
+          </div>
+          <div class="field keybind">
+            <span id="bind-volumeUp">Volume up</span>
+            <button type="button" class="btn small keycap" data-bind="volumeUp"></button>
+            <small class="hotkey-note" hidden></small>
+          </div>
+          <div class="field keybind">
+            <span id="bind-volumeDown">Volume down</span>
+            <button type="button" class="btn small keycap" data-bind="volumeDown"></button>
+            <small class="hotkey-note" hidden></small>
+          </div>
+          <div class="field keybind">
+            <span id="bind-clear">Clear waiting messages</span>
+            <button type="button" class="btn small keycap" data-bind="clear"></button>
+            <small class="hotkey-note" hidden></small>
+          </div>
+          <div class="field keybind desktop-only">
+            <span id="bind-toggleWindow">Show / hide the window</span>
+            <button type="button" class="btn small keycap" data-bind="toggleWindow"></button>
+            <small class="hotkey-note" hidden></small>
+          </div>
+          <p class="hint">Click a shortcut and press the keys you want. Backspace clears it, Esc keeps the old one.</p>
+
+          <label class="check desktop-only"><input type="checkbox" id="globalHotkeys"> Let these work while another app is focused</label>
+          <label class="check"><input type="checkbox" id="mediaKeys"> Use the keyboard’s ⏯ media key too, for pause and skip</label>
+          <p class="hint browser-only">Normal shortcuts work while this tab is focused. The media key also works while you’re in a game.</p>
+          <p class="hint desktop-only" id="hotkeyStatus" role="status"></p>
+          <p class="hint desktop-only" id="accessibilityNote" hidden>
+            macOS only hands the ⏯ key to apps allowed under Privacy &amp; Security → Accessibility.
+            <button type="button" class="btn small" id="accessibilityBtn">Ask for access</button>
+          </p>
+          <p class="hint desktop-only" id="desktopVersion"></p>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-backup" aria-labelledby="tab-backup" tabindex="0" hidden>
+          <p class="hint">Everything on this page — voices, reading options, nicknames, filters, viewer interactions and shortcuts — is kept in this browser only. Save a copy to keep it safe or to move it to another computer.</p>
+          <div class="btn-row wrap">
+            <button type="button" class="btn small" id="exportBtn">Save settings to a file…</button>
+            <button type="button" class="btn small" id="importBtn">Load settings from a file…</button>
+          </div>
+          <input type="file" id="importFile" accept="application/json,.json" class="sr-only" tabindex="-1" aria-hidden="true">
+          <p class="hint" id="backupStatus" role="status"></p>
+          <button type="button" class="btn small danger" id="resetBtn">Reset everything to defaults</button>
+        </section>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<div id="gate" class="gate" role="dialog" aria-modal="true" aria-label="Start reading" hidden>
   <button id="gateBtn" class="btn primary">Click to start reading <span id="gateChannel"></span></button>
 </div>
+
+<div id="srAnnounce" class="sr-only" role="status" aria-live="polite"></div>
 
 <script src="js/irc.js"></script>
 <script src="js/emotes.js"></script>

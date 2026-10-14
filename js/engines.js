@@ -256,6 +256,61 @@ const KOKORO_VOICES = [
 ];
 const KOKORO_BEST = KOKORO_VOICES.filter((v) => /^[ABC]/.test(v.grade) && v.grade !== 'C-').map((v) => v.id);
 
+// Effects viewers can put on a message with bits or channel points. Neural
+// audio goes through Web Audio, so it gets the real thing; system voices can
+// only change pitch and pace, which is all `pitch` and `rate` are for.
+const VOICE_EFFECTS = {
+  chipmunk: { label: 'Chipmunk', playbackRate: 1.45, pitch: 2, rate: 1.25 },
+  giant: { label: 'Giant', playbackRate: 0.72, pitch: 0.1, rate: 0.85 },
+  robot: { label: 'Robot', ring: 60, pitch: 0.6, rate: 0.95, neuralOnly: true },
+  echo: { label: 'Echo', echo: 0.22, neuralOnly: true },
+};
+
+// Wire `source` to `destination` through an effect. Returns a function that
+// takes the extra nodes down again once the message is over.
+function connectEffect(ctx, source, fx, destination) {
+  if (fx && fx.ring) {
+    // Ring modulation: the voice multiplied by a low sine wave, the classic
+    // sci-fi robot. The oscillator drives the gain, which starts at zero;
+    // `depth` makes up the loudness a sine wave takes away.
+    const ring = ctx.createGain();
+    ring.gain.value = 0;
+    const depth = ctx.createGain();
+    depth.gain.value = Math.SQRT2;
+    const osc = ctx.createOscillator();
+    osc.frequency.value = fx.ring;
+    osc.connect(depth);
+    depth.connect(ring.gain);
+    osc.start();
+    source.connect(ring);
+    ring.connect(destination);
+    return () => { try { osc.stop(); } catch {} depth.disconnect(); ring.disconnect(); };
+  }
+  if (fx && fx.echo) {
+    const delay = ctx.createDelay(1);
+    delay.delayTime.value = fx.echo;
+    const feedback = ctx.createGain();
+    feedback.gain.value = 0.38;
+    // The repeats pile up on the voice, so both are turned down to keep the
+    // whole about as loud as a plain message.
+    const dry = ctx.createGain();
+    dry.gain.value = 0.7;
+    const wet = ctx.createGain();
+    wet.gain.value = 0.35;
+    source.connect(dry);
+    dry.connect(destination);
+    source.connect(delay);
+    delay.connect(feedback);
+    feedback.connect(delay);
+    delay.connect(wet);
+    wet.connect(destination);
+    // Let the repeats ring out rather than cutting them off mid-word.
+    return () => setTimeout(() => { for (const node of [dry, delay, feedback, wet]) node.disconnect(); }, 2500);
+  }
+  source.connect(destination);
+  return () => {};
+}
+
 
 class KokoroEngine {
   constructor({ onState }) {
@@ -441,13 +496,15 @@ class KokoroEngine {
     for (const { text, voiceId, speed } of items) this.generate(text, voiceId, speed);
   }
 
-  speak(text, { voiceId, speed = 1 }, { getVolume }) {
+  speak(text, { voiceId, speed = 1, effect = null }, { getVolume }) {
     const ctx = this.ensureAudio();
+    const fx = VOICE_EFFECTS[effect] || null;
     const gain = this.gain;
     gain.gain.value = getVolume();
 
     let state = 'playing';
     let source = null;
+    let teardown = null;
     let startedAt = 0;
     let duration = 0;
     let resolveDone;
@@ -456,6 +513,7 @@ class KokoroEngine {
     const finish = () => {
       if (state === 'done') return;
       state = 'done';
+      if (teardown) teardown();
       resolveDone();
     };
 
@@ -468,9 +526,12 @@ class KokoroEngine {
       buffer.copyToChannel(samples, 0);
       source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(gain);
+      // Faster playback raises the pitch with it, which is the whole joke.
+      const playbackRate = (fx && fx.playbackRate) || 1;
+      source.playbackRate.value = playbackRate;
+      teardown = connectEffect(ctx, source, fx, gain);
       source.onended = finish;
-      duration = buffer.duration;
+      duration = buffer.duration / playbackRate;
       startedAt = ctx.currentTime;
       source.start();
     }, (err) => {

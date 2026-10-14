@@ -32,6 +32,12 @@ function removeEmotes(text, emotesTag) {
   return chars.join('');
 }
 
+// Cheermotes are a word glued to an amount, "Cheer100" or "Kappa50", and
+// Twitch doesn't mark them like emotes. Only called on messages with bits.
+function stripCheermotes(text) {
+  return text.replace(/(^|\s)[A-Za-z]+\d+(?=\s|$)/g, '$1');
+}
+
 function normalizeLogin(name) {
   return (name || '').trim().replace(/^@/, '').toLowerCase();
 }
@@ -123,6 +129,15 @@ function composeSpeech(entry, prev, settings) {
 
   if (entry.kind === 'announcement') {
     return body ? `Announcement from ${name}: ${body}` : '';
+  }
+
+  // Said by the reader itself, e.g. "Alice now sounds like this."
+  if (entry.kind === 'notice') return body;
+
+  // A cheer is worth saying even with no message, and always says who paid.
+  if (entry.bits && settings.cheerAnnounce) {
+    const lead = `${name} cheered ${entry.bits} bit${entry.bits === 1 ? '' : 's'}`;
+    return body ? `${lead}: ${body}` : lead;
   }
 
   if (!body) return '';

@@ -39,7 +39,7 @@ right-click the app and choose *Open*, on Windows choose *More info* → *Run an
 
 ### Keys
 
-Every action can be rebound: click a shortcut in the Keys section and press the keys
+Every action can be rebound: click a shortcut under *Settings → Keys* and press the keys
 you want. Backspace clears one, Esc keeps the old one.
 
 | Action | Default |
@@ -54,15 +54,19 @@ you want. Backspace clears one, Esc keeps the old one.
   key away from every other app. Function keys (F1–F24) can stand on their own.
 - If another app already holds a combination, the row says so and nothing is bound to
   it — pick different keys.
+- On macOS the Settings menu opens the settings with ⌘, and saves and loads the settings
+  file with ⌘S and ⌘O. Elsewhere the app has no menu bar, so use the *Settings* button
+  and its *Backup* tab.
 - Turning off *Let these work while another app is focused* makes the shortcuts behave
   like the web version: only inside the window.
 - *Use the keyboard's ⏯ media key* adds ⏯ and ⏭ on top of your own shortcuts. macOS
   only sends media keys to apps allowed under System Settings → Privacy & Security →
   Accessibility, and the app offers a button that asks for it.
 
-Closing the window leaves the reader running: the app sits in the tray (menu bar on
-macOS), which has pause, skip, clear and quit. Reading also keeps its normal speed
-while the window is hidden or behind a game.
+Closing the window asks whether to minimize to the tray or quit. Minimizing leaves the
+reader running: the app sits in the tray (menu bar on macOS), which has pause, skip,
+clear and quit. Reading also keeps its normal speed while the window is hidden or
+behind a game.
 
 ### Building it yourself
 
@@ -111,7 +115,7 @@ Coolify and Railway build static sites with Railpack. Railpack's default Caddy c
 Notes:
 - Voice quality depends on the browser. Edge's "Natural" voices are the best free option. Firefox on Linux needs `speech-dispatcher` installed for system voices.
 - The ⏯ media-key option works most reliably in Chrome and Edge. The desktop app registers it with the OS instead, so it doesn't depend on the browser.
-- If a shortcut clashes with your browser, rebind it in the Keys section. Some browsers use Alt+letter shortcuts for their own menus on Windows.
+- If a shortcut clashes with your browser, rebind it under *Settings → Keys*. Some browsers use Alt+letter shortcuts for their own menus on Windows.
 
 ## Features
 
@@ -120,7 +124,7 @@ Notes:
 - **Pause on a message:** press **Alt+P** (⌥P on Mac) or the big button. Reading stops mid-message and new messages keep queueing. Pressing it again continues that same message.
   - Neural voices resume at the exact point.
   - System voices resume from the last word spoken, or from the start of the sentence if the voice doesn't report word positions.
-- **Skip:** Alt+S. You can remove waiting messages with ×. Both shortcuts can be rebound in the Keys section.
+- **Skip:** Alt+S. You can remove waiting messages with ×. Both shortcuts can be rebound under *Settings → Keys*.
 - **Media key:** turn on *Use the keyboard's ⏯ media key* to pause and resume while a game or another app is focused. Normal shortcuts only work while the tab is focused, which is a browser limitation — the [desktop app](#desktop-app) has no such limit and makes every shortcut work from any app.
 - **Volume and speed:** with neural voices, volume changes apply instantly.
 - **Multiple voices:** each chatter gets a consistent voice from the pool, with a slight per-chatter pitch and pace variation. Click the voice tag on a message to give that chatter a different voice.
@@ -131,6 +135,103 @@ Notes:
 - **Emotes:** Twitch marks its own emotes in the message, but 7TV, BetterTTV and FrankerFaceZ ones arrive as ordinary words, so the channel's emote names are fetched from those three services when you connect. Under *Reading → Emotes* you can skip everything (the default), skip only Twitch's own emotes and make no third-party requests, or have emote names read out loud.
   - **Messages that are nothing but emotes** are read out by name — `KEKW`, `catJAM` — because staying silent on them makes the reader look broken. Turn off *Still read a message that is nothing but emotes* to skip those instead. Either way, emotes inside a sentence are still taken out, so `Kappa that was close` reads as "that was close".
   - Channel emote sets contain names that are also everyday words (`Chat`, `Stare`, `Timer`). Those are never taken out of a sentence: a name that could be a word someone typed is only dropped when the whole message is emotes.
+- **Viewer interactions:** bits, channel point rewards and chat commands can change how chat is read — viewers can pick their own voice, put a chipmunk or robot effect on a message, or skip the line, and mods can pause or skip from chat. See [Viewer interactions](#viewer-interactions).
+- **Readable at any size:** a light, dark or system theme, a stronger-contrast mode, and a *size of everything* setting that scales the whole page up to 200% without a sideways scrollbar. See [Accessibility](#accessibility).
+- **Backup:** save every setting to a file and load it back, on this computer or another one. See [Your settings](#your-settings).
+
+## Viewer interactions
+
+Under *Settings → Viewers*. The page reads chat without logging in, so it can only
+react to what Twitch puts in chat, and it can't reply there: viewers hear the result
+instead.
+
+**Bits**
+
+| Setting | What it does |
+|---|---|
+| Say who cheered and how many bits | *"Alice cheered 500 bits: …"*. A cheer with no message is still read |
+| Cheers of at least *N* bits are read before everything else | They go to the front of the queue, behind earlier cheers that also did |
+| Cheers of at least *N* bits can pick a voice effect | The first word after the cheer picks it: `Cheer200 robot hello chat` |
+
+Cheermotes (`Cheer100`, `Kappa50`) are never read out. Messages that cost bits or
+channel points are never dropped by *Skip old messages*.
+
+**Voice effects:** chipmunk, giant, robot and echo. Neural voices play them through
+Web Audio. System voices can only change pitch and pace, so chipmunk and giant still
+work, robot is a lower pitch, and echo does nothing.
+
+**Channel points.** Twitch only shows a redemption in chat when the reward has
+*Require Viewer to Enter Text* turned on, so only those rewards can be used. Twitch
+doesn't send the reward's title, so a reward is linked by redeeming it once:
+
+1. Create the reward on Twitch, with *Require Viewer to Enter Text* on.
+2. Under *Channel points*, pick what it should do and press *Link the next redemption*.
+3. Redeem it on your channel. The page links that reward, and you can give it a name.
+
+A linked reward can let the viewer pick their voice (they type the voice name), read
+the message before everything else, or read it with one of the effects. *Highlight
+My Message* redemptions can also jump the queue.
+
+**Chat commands.** Both command words can be changed, and set to *Nobody* if another
+bot already uses them.
+
+| Command | Who (default) | What it does |
+|---|---|---|
+| `!voice Bella` | Everyone | Picks a voice from your voice pool by name. On its own, moves to the next one. Kept like clicking a voice tag, and announced as *"… now sounds like this"* in the new voice (at most every 15 seconds per chatter) |
+| `!tts skip`, `pause`, `resume`, `clear` | Mods | Same as the buttons |
+| `!tts volume 40`, `volume +10`, `speed 1.2` | Mods | Sets the volume (0–100) or speed (0.6–2), absolute or relative |
+
+The broadcaster can use both. A command that did something isn't read out; the feed
+shows what it did in place of the status.
+
+## Accessibility
+
+The page is meant to be usable with a screen reader, with the keyboard alone, or
+simply made bigger. Under *Settings → Display*:
+
+| Setting | What it does |
+|---|---|
+| Theme | Light, dark, or whatever the system asks for (the default) |
+| Size of everything | Scales the page: 100%, 115%, 130%, 150%, 175% or 200% |
+| Stronger contrast | Black-on-white or white-on-black text, thicker borders and focus rings, and no dimming of messages that have been read. Chatters' own name colours, which are often unreadable, are dropped |
+| Stop animations | Also happens on its own when the system asks for less motion |
+| Say what happened | Short screen-reader notices when reading pauses, resumes, skips, the queue is cleared or the volume changes — the things a hotkey can do while you're looking at something else |
+
+New chat messages are deliberately *not* announced: they are read out loud
+anyway, and a live region would say everything twice.
+
+Beyond those settings:
+
+- Links at the top of the page jump straight to the player or the chat. The
+  *Settings* button opens a dialog with one tab per section; the arrow keys move
+  between tabs and Esc closes it.
+- The window fits without scrolling: only the chat scrolls, inside its own panel.
+  The line under the player shows which voices are in use and how far the neural
+  model has loaded; click it to open the voice settings.
+- Everything can be reached with Tab and has a visible focus ring. Every
+  icon-sized button — the voice tag, ▶, × — says what it does and to whom.
+- All of it keeps working with the browser's own zoom, and nothing depends on
+  colour alone.
+
+## Your settings
+
+Settings live in this browser's local storage, per site: they are not synced,
+and clearing site data clears them. Under *Backup*:
+
+- **Save settings to a file…** writes `chat-reader-settings-<date>.json` — voices,
+  reading options, filters, nicknames, viewer interactions and linked rewards,
+  shortcuts and the display settings above.
+  The desktop app opens a normal save dialog (on macOS also from the Settings menu,
+  ⌘S); a browser downloads the file.
+- **Load settings from a file…** reads one back. Every value is checked before it
+  is used, anything unrecognisable is left alone, and the page updates without a
+  reload. A file from an older version is fine: the settings it doesn't mention
+  keep their current values.
+- **Reset everything to defaults** clears the lot after asking first.
+
+Voice names differ between computers, so a system voice that doesn't exist on the
+machine you load the file on is quietly dropped from the pool; neural voices are
+the same everywhere.
 
 ## Voice engines
 
