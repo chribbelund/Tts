@@ -124,7 +124,7 @@ const EventSub = Bot.eventsub = {
   retryTimer: null,
 };
 
-function setState(state, text = '') {
+function setEventSubState(state, text = '') {
   EventSub.state = state;
   EventSub.text = text;
   Bot.emit('eventsub', { state, text });
@@ -145,13 +145,13 @@ EventSub.stop = () => {
     ws.close();
   }
   EventSub.sessionId = '';
-  setState('idle', '');
+  setEventSubState('idle', '');
 };
 
 // `fresh`: a new session that needs its subscriptions made. A reconnect URL
 // that Twitch hands over carries them across instead.
 EventSub.open = (url, fresh) => {
-  setState('connecting', 'Connecting to Twitch events…');
+  setEventSubState('connecting', 'Connecting to Twitch events…');
   const ws = new WebSocket(url);
   const previous = EventSub.ws;
   EventSub.ws = ws;
@@ -171,8 +171,12 @@ EventSub.open = (url, fresh) => {
       EventSub.retries = 0;
       if (previous && previous !== ws) previous.close();
       EventSub.draining = null;
-      if (fresh) subscribeAll();
-      else setState('connected', 'Receiving Twitch events');
+      if (fresh) {
+        subscribeAll(ws).catch((err) => {
+          if (EventSub.ws === ws) setEventSubState('error', `Couldn’t subscribe to Twitch events: ${err.message}`);
+        });
+      }
+      else setEventSubState('connected', 'Receiving Twitch events');
       resetWatchdog();
     } else if (type === 'session_reconnect') {
       EventSub.open(data.payload.session.reconnect_url, false);
@@ -194,9 +198,9 @@ EventSub.open = (url, fresh) => {
     if (EventSub.ws !== ws) return;
     EventSub.ws = null;
     clearTimeout(EventSub.watchdog);
-    if (!Bot.twitch.loggedIn()) { setState('idle', ''); return; }
+    if (!Bot.twitch.loggedIn()) { setEventSubState('idle', ''); return; }
     const delay = Math.min(60000, 1000 * 2 ** EventSub.retries++);
-    setState('error', `Twitch events dropped${event.code >= 4000 ? ` (${event.code})` : ''}, retrying in ${Math.round(delay / 1000)} s…`);
+    setEventSubState('error', `Twitch events dropped${event.code >= 4000 ? ` (${event.code})` : ''}, retrying in ${Math.round(delay / 1000)} s…`);
     EventSub.retryTimer = setTimeout(() => EventSub.open(EVENTSUB_URL, true), delay);
   };
 };
@@ -208,7 +212,7 @@ function resetWatchdog() {
   EventSub.watchdog = setTimeout(() => { if (EventSub.ws) EventSub.ws.close(); }, EventSub.keepaliveMs + 5000);
 }
 
-async function subscribeAll() {
+async function subscribeAll(ws) {
   const id = Bot.twitch.streamerId();
   EventSub.failed = {};
   let ok = 0;
@@ -230,9 +234,11 @@ async function subscribeAll() {
       EventSub.failed[sub.type] = err.message;
     }
   }));
+  // A newer socket took over meanwhile (a reconnect, logging in again): it says how things are.
+  if (EventSub.ws !== ws) return;
   const failed = Object.keys(EventSub.failed);
   if (failed.length) Bot.log('error', `Couldn’t listen for ${failed.join(', ')}: ${Object.values(EventSub.failed)[0]}`);
-  setState(ok ? 'connected' : 'error', ok ? `Receiving Twitch events${failed.length ? ` (${failed.length} unavailable)` : ''}` : 'Couldn’t subscribe to any Twitch events');
+  setEventSubState(ok ? 'connected' : 'error', ok ? `Receiving Twitch events${failed.length ? ` (${failed.length} unavailable)` : ''}` : 'Couldn’t subscribe to any Twitch events');
 }
 
 function handleNotification(subType, event) {

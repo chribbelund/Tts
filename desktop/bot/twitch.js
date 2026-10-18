@@ -32,19 +32,22 @@ const Twitch = Bot.twitch = {
 };
 
 const form = (fields) => new URLSearchParams(fields).toString();
+// A request Twitch never answers shouldn't leave the bot waiting forever.
+const timeout = () => AbortSignal.timeout(20000);
 
 async function idPost(path, fields) {
   const res = await fetch(`${TWITCH_ID}/${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: form(fields),
+    signal: timeout(),
   });
   const body = await res.json().catch(() => ({}));
   return { ok: res.ok, status: res.status, body };
 }
 
 async function validate(token) {
-  const res = await fetch(`${TWITCH_ID}/validate`, { headers: { Authorization: `OAuth ${token}` } });
+  const res = await fetch(`${TWITCH_ID}/validate`, { headers: { Authorization: `OAuth ${token}` }, signal: timeout() });
   if (!res.ok) return null;
   return res.json();
 }
@@ -223,6 +226,7 @@ Twitch.api = async (method, path, { query = null, body = null, as = 'streamer', 
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal: timeout(),
   });
   if (res.status === 401 && retry) {
     await Twitch.token(as, { force: true });

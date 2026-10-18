@@ -17,7 +17,7 @@ Object.assign(Bot.events.types, {
   obsRecordingStopped: { name: 'OBS stopped recording', category: 'OBS', fields: [], text: () => 'OBS stopped recording' },
 });
 
-function setState(state, text = '') {
+function setObsState(state, text = '') {
   Obs.state = state;
   Obs.text = text;
   Bot.emit('obs', { state, text });
@@ -32,8 +32,8 @@ Obs.connect = async () => {
   Obs.disconnect(true);
   Obs.wanted = true;
   const url = Bot.data.obs.url.trim() || 'ws://127.0.0.1:4455';
-  if (!/^wss?:\/\//.test(url)) { setState('error', 'The address has to start with ws://'); return; }
-  setState('connecting', 'Connecting to OBS…');
+  if (!/^wss?:\/\//.test(url)) { setObsState('error', 'The address has to start with ws://'); return; }
+  setObsState('connecting', 'Connecting to OBS…');
   const password = (await Bot.desktop.getSecret('obs-password')) || '';
   const ws = new WebSocket(url);
   Obs.ws = ws;
@@ -46,12 +46,12 @@ Obs.connect = async () => {
       const identify = { rpcVersion: 1, eventSubscriptions: 1 | 4 | 64 };
       const auth = data.d.authentication;
       if (auth) {
-        if (!password) { setState('error', 'OBS asks for a password. Enter it under OBS, in the Stream section.'); ws.close(); return; }
+        if (!password) { setObsState('error', 'OBS asks for a password. Enter it under OBS, in the Stream section.'); ws.close(); return; }
         identify.authentication = await sha256b64((await sha256b64(password + auth.salt)) + auth.challenge);
       }
       ws.send(JSON.stringify({ op: 1, d: identify }));
     } else if (data.op === 2) {
-      setState('connected', 'Connected to OBS');
+      setObsState('connected', 'Connected to OBS');
       Obs.refreshLists();
     } else if (data.op === 7) {
       const p = Obs.pending.get(data.d.requestId);
@@ -69,9 +69,9 @@ Obs.connect = async () => {
     Obs.ws = null;
     for (const p of Obs.pending.values()) p.reject(new Error('OBS disconnected'));
     Obs.pending.clear();
-    if (event.code === 4009) { setState('error', 'Wrong OBS password'); return; }
-    if (!Obs.wanted) { setState('idle', ''); return; }
-    setState('error', 'Can’t reach OBS. Trying again in 15 s… (Is it open, with the WebSocket server on?)');
+    if (event.code === 4009) { setObsState('error', 'Wrong OBS password'); return; }
+    if (!Obs.wanted) { setObsState('idle', ''); return; }
+    setObsState('error', 'Can’t reach OBS. Trying again in 15 s… (Is it open, with the WebSocket server on?)');
     Obs.retryTimer = setTimeout(() => { if (Obs.wanted) Obs.connect(); }, 15000);
   };
 };
@@ -80,7 +80,7 @@ Obs.disconnect = (keepWanted = false) => {
   if (!keepWanted) Obs.wanted = false;
   clearTimeout(Obs.retryTimer);
   if (Obs.ws) { const ws = Obs.ws; Obs.ws = null; ws.close(); }
-  setState('idle', '');
+  setObsState('idle', '');
 };
 
 Obs.request = (requestType, requestData = {}) => new Promise((resolve, reject) => {

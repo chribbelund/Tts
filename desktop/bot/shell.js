@@ -236,7 +236,9 @@
     out.account = !Bot.twitch.loggedIn() ? { state: 'off', text: 'Not logged in to Twitch' }
       : es === 'error' ? { state: 'error', text: Bot.eventsub.text }
       : es === 'connected' ? { state: 'on', text: `${Bot.twitch.accounts.streamer ? Bot.twitch.accounts.streamer.displayName : ''} · ${Bot.community.live ? 'live' : 'offline'}` }
-      : { state: 'connecting', text: 'Connecting…' };
+      : es === 'connecting' ? { state: 'connecting', text: 'Connecting…' }
+      // Logged in, but nothing is listening: say so rather than "connecting" forever.
+      : { state: 'error', text: 'Not listening for Twitch events. Log out and in again.' };
     const o = Bot.overlayStatus || {};
     out.overlay = o.error ? { state: 'error', text: o.error } : o.running && o.clients ? { state: 'on', text: `${o.clients} open` } : null;
     out.obs = Bot.obs.state === 'connected' ? { state: 'on', text: 'Connected' } : Bot.obs.state === 'error' ? { state: 'error', text: Bot.obs.text } : null;

@@ -76,6 +76,16 @@ function startTwitch() {
   hookIntoReader();
   UI.init();
 
+  // Before anything below can fail or stall: a login made from the Accounts
+  // page has to start the Twitch events whatever happened at startup.
+  Bot.on('login', (role) => { if (role === 'streamer') startTwitch(); UI.rerender(); });
+  Bot.on('logout', (role) => {
+    if (role === 'streamer') Bot.eventsub.stop();
+    UI.rerender();
+  });
+  Bot.on('stream', (stream) => { UI.lastStream = stream; });
+  Bot.on('reset', () => { Bot.lists.publish(); Bot.host.syncHotkeys(); Bot.applyOverlay(); });
+
   Bot.desktop.onMainEvent(({ type, payload }) => {
     if (type === 'overlay') { Bot.overlayStatus = payload; Bot.emit('overlay'); }
     if (type === 'api' && payload && payload.action === 'run') {
@@ -88,19 +98,12 @@ function startTwitch() {
   for (const t of Bot.data.timers) { t.lastRun = Date.now(); t.linesSince = 0; }
 
   await Bot.applyOverlay().catch((err) => Bot.log('error', `Overlay: ${err.message}`));
-  Bot.lists.publish();
-  Bot.timers.start();
-  Bot.community.start();
+  // One part that fails to start shouldn't keep the rest (Twitch above all) from starting.
+  for (const [name, step] of [['effect lists', Bot.lists.publish], ['timers', Bot.timers.start], ['community', Bot.community.start]]) {
+    try { step(); } catch (err) { Bot.log('error', `Couldn’t start the ${name}: ${err.message}`); }
+  }
 
-  Bot.on('login', (role) => { if (role === 'streamer') startTwitch(); UI.rerender(); });
-  Bot.on('logout', (role) => {
-    if (role === 'streamer') Bot.eventsub.stop();
-    UI.rerender();
-  });
-  Bot.on('stream', (stream) => { UI.lastStream = stream; });
-  Bot.on('reset', () => { Bot.lists.publish(); Bot.host.syncHotkeys(); Bot.applyOverlay(); });
-
-  await Bot.twitch.init();
+  await Bot.twitch.init().catch((err) => Bot.log('error', `Twitch: ${err.message}`));
   if (Bot.twitch.loggedIn()) startTwitch();
   if (Bot.data.obs.enabled && Bot.data.obs.autoConnect) Bot.obs.connect();
   Bot.relay.start();
