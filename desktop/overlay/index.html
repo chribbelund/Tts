@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat Reader overlay</title>
+<link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+<!-- Served by the desktop app (desktop/bot-main.js) for OBS's browser
+     source. Everything is transparent until an effect puts something here. -->
+<div id="stage">
+  <div class="pos" data-pos="top-left"></div>
+  <div class="pos" data-pos="top"></div>
+  <div class="pos" data-pos="top-right"></div>
+  <div class="pos" data-pos="left"></div>
+  <div class="pos" data-pos="center"></div>
+  <div class="pos" data-pos="right"></div>
+  <div class="pos" data-pos="bottom-left"></div>
+  <div class="pos" data-pos="bottom"></div>
+  <div class="pos" data-pos="bottom-right"></div>
+</div>
+<div id="counter" hidden></div>
+<ol id="chat" hidden></ol>
+<script src="overlay.js"></script>
+</body>
+</html>

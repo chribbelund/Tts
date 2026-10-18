@@ -3,9 +3,11 @@
 const { app, BrowserWindow, Menu, Notification, Tray, dialog, globalShortcut, ipcMain, nativeImage, shell, systemPreferences } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { toAccelerator, isMediaKey } = require('./accelerator');
 const { YouTubeChat } = require('./sources/youtube');
 const { TikTokChat } = require('./sources/tiktok');
+const bot = require('./bot-main');
 
 // Chromium won't play audio until the page has been clicked. A reader that is
 // started or resumed by a hotkey has no click to wait for, so allow it up front.
@@ -25,6 +27,8 @@ function resolveWebRoot() {
 }
 
 const WEB_ROOT = resolveWebRoot();
+// The bot's half of the page (desktop/bot/), which only the app loads.
+const BOT_BASE = pathToFileURL(path.join(__dirname, 'bot') + path.sep).href;
 const ICON = nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png'));
 
 let win = null;
@@ -53,7 +57,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
-      additionalArguments: [`--app-version=${app.getVersion()}`],
+      additionalArguments: [`--app-version=${app.getVersion()}`, `--bot-base=${BOT_BASE}`],
       // Keep speaking at full speed while the window is hidden or behind a game.
       backgroundThrottling: false,
     },
@@ -317,6 +321,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showWindow);
 
   app.whenReady().then(() => {
+    bot.setup({ getWindow: () => win });
     buildMenu();
     buildTray();
     createWindow();

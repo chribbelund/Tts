@@ -348,6 +348,9 @@ const isPaidFor = (entry) => !!(entry.priority || entry.bits || entry.rewardId |
 function filterReason(entry) {
   // A chat command that did something says what instead of being read.
   if (entry.handled) return entry.handled;
+  // The desktop app's bot can keep its own replies out of the queue.
+  const botReason = host.skipReason && host.skipReason(entry);
+  if (botReason) return botReason;
   if (entry.kind === 'event' && !settings.readEvents) return 'events off';
   if (entry.kind === 'chat') {
     if (isIgnored(entry.login)) return 'ignored';
@@ -439,6 +442,8 @@ const ACTIONS = {
 const actionEnabled = (action) => action !== 'replay' || settings.replay;
 
 function runAction(action) {
+  // The desktop app's bot has hotkeys of its own, named "bot:…".
+  if (action.startsWith('bot:')) { if (host.onAction) host.onAction(action); return; }
   if (ACTIONS[action] && actionEnabled(action)) ACTIONS[action]();
 }
 
@@ -1360,6 +1365,8 @@ function handleRemoteMessage(chat, m) {
   const entry = withSource(entryFromRemote(chat ? chat.platform : m.platform, m), chat);
   if (entry.kind === 'chat' && !entry.paid) runChatCommand(entry);
   entry.speechBody = entrySpeechBody(entry);
+  // The desktop app's bot answers commands from YouTube and TikTok too.
+  if (host.onRemoteMessage) host.onRemoteMessage(entry, m);
   enqueue(entry);
 }
 
@@ -1471,6 +1478,11 @@ function addToFeed(entry) {
 
 function setStatus(entry, status, note) {
   entry.status = status;
+  // Something the bot said, which an effect may be waiting on.
+  if (entry.whenDone && status !== 'queued' && status !== 'speaking') {
+    entry.whenDone(status);
+    entry.whenDone = null;
+  }
   if (!entry.node) return;
   entry.node.dataset.status = status;
   entry.stateEl.textContent = note || STATUS_TEXT[status] || status;
@@ -2145,7 +2157,7 @@ window.addEventListener('keydown', (e) => {
   const matches = (b) => b && b.code === e.code && !!b.ctrl === e.ctrlKey && !!b.alt === e.altKey && !!b.shift === e.shiftKey && !!b.meta === e.metaKey;
   const typing = e.target.closest && e.target.closest('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select, [contenteditable]');
 
-  for (const [action, binding] of Object.entries(settings.keys)) {
+  for (const [action, binding] of [...Object.entries(settings.keys), ...hostHotkeys()]) {
     if (!matches(binding) || !actionEnabled(action)) continue;
     if (typing && !(binding.ctrl || binding.alt || binding.meta)) return;
     // In the desktop app the OS already delivered this one, from whichever
@@ -2221,7 +2233,7 @@ function syncGlobalHotkeys() {
   desktop.applyHotkeys({
     enabled: settings.globalHotkeys,
     // A switched-off action doesn't take its keys from other apps.
-    bindings: Object.fromEntries(Object.entries(settings.keys).filter(([action]) => actionEnabled(action))),
+    bindings: Object.fromEntries([...Object.entries(settings.keys).filter(([action]) => actionEnabled(action)), ...hostHotkeys()]),
     media: settings.mediaKeys,
     mediaReplay: settings.replay,
   }).then((result) => {
@@ -2300,6 +2312,8 @@ function settingsFileText() {
     version: BACKUP_VERSION,
     savedAt: new Date().toISOString(),
     settings,
+    // The desktop app's bot goes in the same file. The website has none.
+    ...(host.backupExtra ? { bot: host.backupExtra() } : {}),
   }, null, 2);
 }
 
@@ -2358,15 +2372,26 @@ function applyImportedText(text, name) {
     backupStatus('That file doesn’t hold any settings.');
     return;
   }
-  const { clean, kept } = sanitizeSettings(raw);
-  if (!kept) {
-    backupStatus('Nothing in that file looked like a Chat Reader setting, so nothing changed.');
+  // The desktop app's bot, saved in the same file (or a file of the bot's own).
+  const botPart = host.restoreExtra && data && (data.bot || (data.kind === 'chat-reader-bot' ? data : null));
+  const kept = importReaderSettings(raw);
+  const botLoaded = botPart ? host.restoreExtra(botPart) : false;
+  if (!kept && !botLoaded) {
+    backupStatus(botPart ? 'Nothing changed.' : 'Nothing in that file looked like a Chat Reader setting, so nothing changed.');
     return;
   }
+  const what = [kept ? `${kept} setting${kept === 1 ? '' : 's'}` : '', botLoaded ? 'the bot setup' : ''].filter(Boolean).join(' and ');
+  backupStatus(`Loaded ${what}${name ? ` from ${name}` : ''}.`);
+}
+
+// Takes over every recognised reader setting in `raw`. Returns how many.
+function importReaderSettings(raw) {
+  const { clean, kept } = sanitizeSettings(raw);
+  if (!kept) return 0;
   Object.assign(settings, clean);
   saveSettings();
   applyAllSettings();
-  backupStatus(`Loaded ${kept} setting${kept === 1 ? '' : 's'}${name ? ` from ${name}` : ''}.`);
+  return kept;
 }
 
 function resetSettings() {
@@ -3160,6 +3185,106 @@ if (systemEngine.supported) {
 }
 
 // ---------------------------------------------------------------------------
+// The desktop app's bot (desktop/bot/, see docs/bot-plan.md)
+// ---------------------------------------------------------------------------
+
+// The website is only a reader and never loads any of this. In the desktop
+// app the bot's scripts are loaded from the app itself and get this object to
+// talk to the reader: say something, pause, skip, and hooks the code above
+// calls when they're set.
+const host = {
+  skipReason: null,       // (entry) => reason to leave it unread, or null
+  onRemoteMessage: null,  // (entry, raw) for YouTube and TikTok chat
+  onAction: null,         // ('bot:…') from a hotkey
+  hotkeys: null,          // () => [['bot:…', binding], …]
+
+  settings,
+  el,
+  keyLabel,
+  announce,
+  openChatterFor: (entry, opener) => openChatter(entry, opener),
+
+  // Said by the reader like its own notices, in the voice asked for (by
+  // name, from every voice of the engine) or the reader's own. Resolves once
+  // it was read, skipped or cleared.
+  speak(text, { voice = '', priority = false, label = 'Bot', login = '' } = {}) {
+    const body = String(text || '').trim();
+    if (!body) return Promise.resolve('skipped');
+    return new Promise((resolve) => {
+      const engine = activeEngine();
+      const entry = {
+        id: `bot-${Date.now()}-${entrySeq + 1}`,
+        kind: 'notice',
+        login,
+        displayName: label,
+        rawText: body,
+        displayText: body,
+        speechBody: body,
+        priority,
+        paid: priority ? { label: '', badge: 'bot' } : null,
+        forcedVoice: voice ? host.findAnyVoice(engine, voice) : readerVoiceOptions(engine).voiceId,
+        whenDone: resolve,
+      };
+      enqueue(entry);
+    });
+  },
+
+  findAnyVoice(engine, name) {
+    const q = String(name).trim().toLowerCase();
+    const all = host.voices(engine);
+    const hit = all.find((v) => v.id.toLowerCase() === q || v.name.toLowerCase() === q)
+      || all.find((v) => v.name.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(q))
+      || all.find((v) => v.name.toLowerCase().includes(q));
+    return hit ? hit.id : readerVoiceOptions(engine).voiceId;
+  },
+
+  // Every voice of the engine in use, the pool first.
+  voices(engine = activeEngine()) {
+    const pool = voicePool(engine);
+    const ids = engine === kokoroEngine ? KOKORO_VOICES.map((v) => v.id) : systemEngine.voices().map((v) => v.id);
+    return [...pool, ...ids.filter((id) => !pool.includes(id))].map((id) => ({ id, name: voiceName(engine, id), inPool: pool.includes(id) }));
+  },
+
+  // The chats in the top bar, for the bot's multistream relay to reuse.
+  readerChats: () => chats.filter(isActive).map((c) => ({ id: c.id, platform: c.platform, target: c.client.channel, state: c.state, videoId: c.client.videoId || '' })),
+
+  state: () => ({ paused: reader.paused, waiting: reader.queue.length, speaking: !!reader.current, volume: settings.volume, rate: settings.rate }),
+  setPaused: (paused) => setPaused(!!paused),
+  togglePause: () => togglePause(),
+  skip: () => skipCurrent(),
+  clear: () => clearQueue(),
+  setVolume: (n) => setVolume(n),
+  setRate: (n) => setRate(n),
+  syncHotkeys: () => syncGlobalHotkeys(),
+  hotkeyProblems: () => (settings.globalHotkeys ? globalHotkeys.problems : {}),
+  // Backups: what the bot adds to the settings file, and how it reads it back.
+  backupExtra: null,      // () => object saved as "bot"
+  restoreExtra: null,     // (object) => true when it was loaded
+  importReaderSettings: (raw) => importReaderSettings(raw),
+};
+window.chatReaderHost = host;
+
+function hostHotkeys() {
+  try { return host.hotkeys ? host.hotkeys() : []; } catch { return []; }
+}
+
+function loadBot() {
+  const base = desktop && desktop.bot && desktop.bot.base;
+  if (!base) return;
+  document.head.append(el('link', { rel: 'stylesheet', href: `${base}bot.css` }));
+  // In order, each after the one before, like the <script> tags above.
+  const files = ['core.js', 'twitch.js', 'eventsub.js', 'variables.js', 'effects.js', 'triggers.js', 'community.js', 'obs.js', 'relay.js', 'importers.js', 'ui.js', 'ui-tabs.js', 'ui-multistream.js', 'start.js'];
+  const next = (i) => {
+    if (i >= files.length) return;
+    const script = el('script', { src: `${base}${files[i]}` });
+    script.addEventListener('load', () => next(i + 1));
+    script.addEventListener('error', () => console.error(`Bot: couldn’t load ${files[i]}`));
+    document.body.append(script);
+  };
+  next(0);
+}
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 
@@ -3198,3 +3323,5 @@ renderNow();
   renderStatusLine();
   renderConnectButton();
 }
+
+loadBot();

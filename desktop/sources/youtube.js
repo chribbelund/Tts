@@ -164,8 +164,9 @@ class YouTubeChat extends EventEmitter {
     this.abort = null;
   }
 
-  status(state, text) {
-    this.emit('event', { type: 'status', state, text });
+  // `videoId`: the live stream being read, so the bot can find its chat to post to.
+  status(state, text, videoId = '') {
+    this.emit('event', { type: 'status', state, text, ...(videoId ? { videoId } : {}) });
   }
 
   async run(signal) {
@@ -183,7 +184,7 @@ class YouTubeChat extends EventEmitter {
         const chat = await this.openChat(video, signal);
         if (signal.aborted) return;
         retries = 0;
-        this.status('connected', `Reading ${video.label}`);
+        this.status('connected', `Reading ${video.label}`, video.id);
         await this.poll(chat, signal);
         if (signal.aborted) return;
         if (this.target.kind === 'video') {

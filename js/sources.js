@@ -140,6 +140,8 @@ class RemoteChat {
     switch (event.type) {
       case 'status':
         if (event.state === 'idle' || event.state === 'error') this.channel = null;
+        // The YouTube stream being read, which the desktop app's bot can post to.
+        this.videoId = event.state === 'connected' ? event.videoId || '' : '';
         this.setState(event.state, event.text);
         break;
       case 'message':

@@ -42,9 +42,13 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      - name: Check the page and the shell parse
+      - name: Check the page, the shell and the bot parse
         working-directory: desktop
-        run: node --check main.js && node --check preload.js && node --check accelerator.js && node --check sources/youtube.js && node --check sources/tiktok.js && node --check ../js/app.js && node --check ../js/sources.js
+        shell: bash
+        run: |
+          for f in *.js sources/*.js bot/*.js overlay/*.js ../js/*.js; do
+            node --check "$f" || exit 1
+          done
 
       - name: Copy the page into the app
         working-directory: desktop
