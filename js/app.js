@@ -205,6 +205,9 @@ function selectSettingsTab(name, { focus = false } = {}) {
 }
 
 function openSettings(tab) {
+  // The desktop app shows the same sections as pages of its own window.
+  const shell = window.chatReaderHost && window.chatReaderHost.showSettings;
+  if (shell) { shell(tab || ''); return; }
   if (tab) selectSettingsTab(tab);
   if (!settingsDialog.open) settingsDialog.showModal();
   if (!tab) settingsTabs.find((t) => t.getAttribute('aria-selected') === 'true').focus();
@@ -348,6 +351,9 @@ const isPaidFor = (entry) => !!(entry.priority || entry.bits || entry.rewardId |
 function filterReason(entry) {
   // A chat command that did something says what instead of being read.
   if (entry.handled) return entry.handled;
+  // The desktop app's bot can keep its own replies out of the queue.
+  const botReason = host.skipReason && host.skipReason(entry);
+  if (botReason) return botReason;
   if (entry.kind === 'event' && !settings.readEvents) return 'events off';
   if (entry.kind === 'chat') {
     if (isIgnored(entry.login)) return 'ignored';
@@ -439,6 +445,8 @@ const ACTIONS = {
 const actionEnabled = (action) => action !== 'replay' || settings.replay;
 
 function runAction(action) {
+  // The desktop app's bot has hotkeys of its own, named "bot:…".
+  if (action.startsWith('bot:')) { if (host.onAction) host.onAction(action); return; }
   if (ACTIONS[action] && actionEnabled(action)) ACTIONS[action]();
 }
 
@@ -1008,7 +1016,10 @@ function applyReward(entry) {
   if (rewardLink.action) linkReward(entry);
   const reward = settings.rewards[entry.rewardId];
   if (!reward) return;
-  if (reward.action === 'voice') entry.handled = pickVoice(entry, entry.rawText);
+  if (reward.action === 'voice') {
+    entry.handled = pickVoice(entry, entry.rawText);
+    readerCommandDone(entry, 'voice', entry.rawText);
+  }
   else if (reward.action === 'priority') entry.priority = true;
   else if (VOICE_EFFECTS[reward.action]) entry.effect = reward.action;
 }
@@ -1027,10 +1038,20 @@ function runChatCommand(entry) {
   const voiceArgs = commandArgs(entry.rawText, settings.voiceCommand);
   if (voiceArgs !== null && mayUse(entry, settings.voiceCommandWho)) {
     entry.handled = pickVoice(entry, voiceArgs);
+    readerCommandDone(entry, 'voice', voiceArgs);
     return;
   }
   const modArgs = commandArgs(entry.rawText, settings.modCommand);
-  if (modArgs !== null && mayUse(entry, settings.modCommandWho)) entry.handled = runModCommand(modArgs);
+  if (modArgs !== null && mayUse(entry, settings.modCommandWho)) {
+    entry.handled = runModCommand(modArgs);
+    readerCommandDone(entry, 'mod', modArgs);
+  }
+}
+
+// The page can't write in chat; the desktop app's bot can answer for it.
+function readerCommandDone(entry, kind, args) {
+  if (!host.onReaderCommand || !entry.handled) return;
+  try { host.onReaderCommand(entry, { kind, args, result: entry.handled }); } catch (err) { console.error(err); }
 }
 
 // "!tts volume 40", "!tts volume +10", "!tts speed 1.2". Unknown words return
@@ -1360,6 +1381,8 @@ function handleRemoteMessage(chat, m) {
   const entry = withSource(entryFromRemote(chat ? chat.platform : m.platform, m), chat);
   if (entry.kind === 'chat' && !entry.paid) runChatCommand(entry);
   entry.speechBody = entrySpeechBody(entry);
+  // The desktop app's bot answers commands from YouTube and TikTok too.
+  if (host.onRemoteMessage) host.onRemoteMessage(entry, m);
   enqueue(entry);
 }
 
@@ -1437,7 +1460,7 @@ function addToFeed(entry) {
     entry.effect ? VOICE_EFFECTS[entry.effect].label.toLowerCase() : null,
     entry.priority ? 'read first' : null,
   ].filter(Boolean);
-  const label = { event: 'Event', notice: 'Reader' }[entry.kind];
+  const label = entry.label || { event: 'Event', notice: 'Reader' }[entry.kind];
   const meta = el('div', { class: 'meta' },
     platformTag(entry),
     label ? el('span', { class: 'reply-to' }, label) : name,
@@ -1471,6 +1494,11 @@ function addToFeed(entry) {
 
 function setStatus(entry, status, note) {
   entry.status = status;
+  // Something the bot said, which an effect may be waiting on.
+  if (entry.whenDone && status !== 'queued' && status !== 'speaking') {
+    entry.whenDone(status);
+    entry.whenDone = null;
+  }
   if (!entry.node) return;
   entry.node.dataset.status = status;
   entry.stateEl.textContent = note || STATUS_TEXT[status] || status;
@@ -1512,6 +1540,7 @@ const nowPanel = $('#nowPanel');
 const nowBar = $('#nowBar');
 
 function renderNow() {
+  readerChanged();
   const entry = reader.current;
   const state = reader.paused ? 'paused' : entry ? 'speaking' : 'idle';
   nowPanel.dataset.state = state;
@@ -1641,6 +1670,7 @@ function renderConnection(chat, state, text) {
 // One line for every chat: the ones being read are named together, anything
 // else (connecting, waiting for a stream, an error) says which chat it is.
 function renderStatusLine() {
+  readerChanged();
   const shown = chats.filter((c) => isActive(c) || c.state === 'error');
   const connected = shown.filter((c) => c.state === 'connected');
   const others = shown.filter((c) => c.state !== 'connected');
@@ -1698,6 +1728,7 @@ function renderVoiceChip(kokoroState = kokoroEngine.state, info = {}) {
   else text = 'Neural voices not loaded · using system voices';
   chip.dataset.state = state;
   $('#voiceChipText').textContent = text;
+  readerChanged();
   chip.setAttribute('aria-label', `${text}. Open voice settings.`);
 }
 
@@ -1954,7 +1985,7 @@ function previewNickname(login) {
 // ---------------------------------------------------------------------------
 
 const chatterDialog = $('#chatterDialog');
-const chatter = { login: '', displayName: '', opener: null };
+const chatter = { login: '', displayName: '', opener: null, entry: null };
 
 const ignoredList = () => settings.ignoredUsers.toLowerCase().split(/[\s,]+/).filter(Boolean);
 const isIgnored = (login) => ignoredList().includes(login);
@@ -2004,14 +2035,25 @@ function saveChatterNickname() {
 
 function openChatter(entry, opener) {
   if (!entry.login) return;
-  Object.assign(chatter, { login: entry.login, displayName: entry.displayName || entry.login, opener });
+  Object.assign(chatter, { login: entry.login, displayName: entry.displayName || entry.login, opener, entry });
   $('#chatterTitle').textContent = chatter.displayName;
   $('#chatterNick').value = settings.nicknames[chatter.login] || '';
   renderChatterVoices();
   renderChatterIgnore();
+  renderChatterExtra();
   chatterDialog.showModal();
   $('#chatterNick').focus();
   $('#chatterNick').select();
+}
+
+// In the desktop app the bot adds the viewer's points, watch time and
+// moderation buttons.
+function renderChatterExtra() {
+  const box = $('#chatterExtra');
+  let part = null;
+  try { part = host.chatterExtra ? host.chatterExtra(chatter.entry) : null; } catch (err) { console.error(err); }
+  box.replaceChildren(...(part ? [part] : []));
+  box.hidden = !part;
 }
 
 $('#chatterForm').addEventListener('submit', (e) => { e.preventDefault(); chatterDialog.close(); });
@@ -2145,7 +2187,7 @@ window.addEventListener('keydown', (e) => {
   const matches = (b) => b && b.code === e.code && !!b.ctrl === e.ctrlKey && !!b.alt === e.altKey && !!b.shift === e.shiftKey && !!b.meta === e.metaKey;
   const typing = e.target.closest && e.target.closest('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select, [contenteditable]');
 
-  for (const [action, binding] of Object.entries(settings.keys)) {
+  for (const [action, binding] of [...Object.entries(settings.keys), ...hostHotkeys()]) {
     if (!matches(binding) || !actionEnabled(action)) continue;
     if (typing && !(binding.ctrl || binding.alt || binding.meta)) return;
     // In the desktop app the OS already delivered this one, from whichever
@@ -2221,7 +2263,7 @@ function syncGlobalHotkeys() {
   desktop.applyHotkeys({
     enabled: settings.globalHotkeys,
     // A switched-off action doesn't take its keys from other apps.
-    bindings: Object.fromEntries(Object.entries(settings.keys).filter(([action]) => actionEnabled(action))),
+    bindings: Object.fromEntries([...Object.entries(settings.keys).filter(([action]) => actionEnabled(action)), ...hostHotkeys()]),
     media: settings.mediaKeys,
     mediaReplay: settings.replay,
   }).then((result) => {
@@ -2300,6 +2342,8 @@ function settingsFileText() {
     version: BACKUP_VERSION,
     savedAt: new Date().toISOString(),
     settings,
+    // The desktop app's bot goes in the same file. The website has none.
+    ...(host.backupExtra ? { bot: host.backupExtra() } : {}),
   }, null, 2);
 }
 
@@ -2358,15 +2402,26 @@ function applyImportedText(text, name) {
     backupStatus('That file doesn’t hold any settings.');
     return;
   }
-  const { clean, kept } = sanitizeSettings(raw);
-  if (!kept) {
-    backupStatus('Nothing in that file looked like a Chat Reader setting, so nothing changed.');
+  // The desktop app's bot, saved in the same file (or a file of the bot's own).
+  const botPart = host.restoreExtra && data && (data.bot || (data.kind === 'chat-reader-bot' ? data : null));
+  const kept = importReaderSettings(raw);
+  const botLoaded = botPart ? host.restoreExtra(botPart) : false;
+  if (!kept && !botLoaded) {
+    backupStatus(botPart ? 'Nothing changed.' : 'Nothing in that file looked like a Chat Reader setting, so nothing changed.');
     return;
   }
+  const what = [kept ? `${kept} setting${kept === 1 ? '' : 's'}` : '', botLoaded ? 'the bot setup' : ''].filter(Boolean).join(' and ');
+  backupStatus(`Loaded ${what}${name ? ` from ${name}` : ''}.`);
+}
+
+// Takes over every recognised reader setting in `raw`. Returns how many.
+function importReaderSettings(raw) {
+  const { clean, kept } = sanitizeSettings(raw);
+  if (!kept) return 0;
   Object.assign(settings, clean);
   saveSettings();
   applyAllSettings();
-  backupStatus(`Loaded ${kept} setting${kept === 1 ? '' : 's'}${name ? ` from ${name}` : ''}.`);
+  return kept;
 }
 
 function resetSettings() {
@@ -3160,6 +3215,178 @@ if (systemEngine.supported) {
 }
 
 // ---------------------------------------------------------------------------
+// The desktop app's bot (desktop/bot/, see docs/bot-plan.md)
+// ---------------------------------------------------------------------------
+
+// The website is only a reader and never loads any of this. In the desktop
+// app the bot's scripts are loaded from the app itself and get this object to
+// talk to the reader: say something, pause, skip, and hooks the code above
+// calls when they're set.
+const host = {
+  skipReason: null,       // (entry) => reason to leave it unread, or null
+  onRemoteMessage: null,  // (entry, raw) for YouTube and TikTok chat
+  onAction: null,         // ('bot:…') from a hotkey
+  hotkeys: null,          // () => [['bot:…', binding], …]
+  showSettings: null,     // (tab) shows a settings section instead of the dialog
+  chatterExtra: null,     // (entry) => a node for the chatter dialog, or null
+  onReaderCommand: null,  // (entry, { kind, args, result }) after !voice or !tts
+  onReaderChange: null,   // () when reading, the queue, the chats or the voices change
+
+  settings,
+  el,
+  keyLabel,
+  announce,
+  openChatterFor: (entry, opener) => openChatter(entry, opener),
+
+  // Said by the reader like its own notices, in the voice asked for (by
+  // name, from every voice of the engine) or the reader's own. Resolves once
+  // it was read, skipped or cleared.
+  speak(text, { voice = '', priority = false, label = 'Bot', login = '' } = {}) {
+    const body = String(text || '').trim();
+    if (!body) return Promise.resolve('skipped');
+    return new Promise((resolve) => {
+      const engine = activeEngine();
+      const entry = {
+        id: `bot-${Date.now()}-${entrySeq + 1}`,
+        kind: 'notice',
+        login,
+        displayName: label,
+        rawText: body,
+        displayText: body,
+        speechBody: body,
+        priority,
+        paid: priority ? { label: '', badge: 'bot' } : null,
+        forcedVoice: voice ? host.findAnyVoice(engine, voice) : readerVoiceOptions(engine).voiceId,
+        whenDone: resolve,
+      };
+      enqueue(entry);
+    });
+  },
+
+  findAnyVoice(engine, name) {
+    const q = String(name).trim().toLowerCase();
+    const all = host.voices(engine);
+    const hit = all.find((v) => v.id.toLowerCase() === q || v.name.toLowerCase() === q)
+      || all.find((v) => v.name.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(q))
+      || all.find((v) => v.name.toLowerCase().includes(q));
+    return hit ? hit.id : readerVoiceOptions(engine).voiceId;
+  },
+
+  // Every voice of the engine in use, the pool first.
+  voices(engine = activeEngine()) {
+    const pool = voicePool(engine);
+    const ids = engine === kokoroEngine ? KOKORO_VOICES.map((v) => v.id) : systemEngine.voices().map((v) => v.id);
+    return [...pool, ...ids.filter((id) => !pool.includes(id))].map((id) => ({ id, name: voiceName(engine, id), inPool: pool.includes(id) }));
+  },
+
+  // The chats in the top bar, for the bot's multistream relay to reuse.
+  readerChats: () => chats.filter(isActive).map((c) => ({ id: c.id, platform: c.platform, target: c.client.channel, state: c.state, videoId: c.client.videoId || '' })),
+
+  state: () => ({ paused: reader.paused, waiting: reader.queue.length, speaking: !!reader.current, volume: settings.volume, rate: settings.rate }),
+  setPaused: (paused) => setPaused(!!paused),
+  togglePause: () => togglePause(),
+  skip: () => skipCurrent(),
+  clear: () => clearQueue(),
+  setVolume: (n) => setVolume(n),
+  setRate: (n) => setRate(n),
+  voiceStatus: () => ({ engine: settings.engine, state: $('#voiceChip').dataset.state, text: $('#voiceChipText').textContent }),
+  current: () => (reader.current ? { displayName: reader.current.displayName, text: reader.current.displayText || '', kind: reader.current.kind } : null),
+
+  // Chatters: the voice and nickname the reader uses for them.
+  chatterVoice(login) {
+    const engine = activeEngine();
+    return voiceName(engine, voiceIdFor(String(login || '').toLowerCase(), engine));
+  },
+  // A voice by name from every voice of the engine, kept like a click on the
+  // voice tag. Returns its name, or '' when there's no such voice.
+  setChatterVoice(login, name) {
+    const engine = activeEngine();
+    const user = String(login || '').toLowerCase().replace(/^@/, '');
+    if (!user) return '';
+    const q = String(name || '').trim();
+    const id = q ? (findVoice(engine, q) || host.voices(engine).find((v) => v.name.toLowerCase().includes(q.toLowerCase()))?.id) : null;
+    if (q && !id) return '';
+    if (!q) {
+      const pool = voicePool(engine);
+      setUserVoice(user, engine, pool[(pool.indexOf(voiceIdFor(user, engine)) + 1) % pool.length]);
+    } else {
+      setUserVoice(user, engine, id);
+    }
+    return host.chatterVoice(user);
+  },
+  nickname: (login) => settings.nicknames[String(login || '').toLowerCase()] || '',
+  setNickname: (login, nickname) => {
+    const user = String(login || '').toLowerCase().replace(/^@/, '');
+    if (user) setNickname(user, String(nickname || '').trim().slice(0, 60));
+  },
+  isIgnored: (login) => isIgnored(String(login || '').toLowerCase()),
+  setIgnored: (login, on) => setIgnored(String(login || '').toLowerCase(), !!on),
+
+  // The reader's own channel point rewards (Viewer controls), by reward id.
+  rewardActions: () => Object.entries(REWARD_ACTIONS).map(([id, a]) => ({ id, name: a.name, label: a.label })),
+  readerRewards: () => settings.rewards,
+  setReaderReward(id, title, action) {
+    if (!action) delete settings.rewards[id];
+    else settings.rewards[id] = { name: String(title || REWARD_ACTIONS[action].name).slice(0, 60), action };
+    saveSettings();
+    renderRewards();
+  },
+
+  // A line in the chat list that isn't read out: a follow, a redemption…
+  feedNote(text, { label = 'Bot', tag = '', platform = '' } = {}) {
+    const body = String(text || '').trim();
+    if (!body) return;
+    const entry = {
+      id: `note-${Date.now()}-${entrySeq + 1}`, uid: ++entrySeq, kind: 'notice', label, platform,
+      login: '', displayName: label, rawText: body, displayText: body, speechBody: '',
+    };
+    addToFeed(entry);
+    entry.node.classList.add('bot-note');
+    setStatus(entry, 'info', tag);
+  },
+  syncHotkeys: () => syncGlobalHotkeys(),
+  hotkeyProblems: () => (settings.globalHotkeys ? globalHotkeys.problems : {}),
+  // Backups: what the bot adds to the settings file, and how it reads it back.
+  backupExtra: null,      // () => object saved as "bot"
+  restoreExtra: null,     // (object) => true when it was loaded
+  importReaderSettings: (raw) => importReaderSettings(raw),
+};
+window.chatReaderHost = host;
+
+// The bot's dashboard follows the player and the chats. Lots of changes come
+// at once, so it's told once per frame at most.
+let readerChangePending = false;
+function readerChanged() {
+  const h = window.chatReaderHost;
+  if (!h || !h.onReaderChange || readerChangePending) return;
+  readerChangePending = true;
+  requestAnimationFrame(() => {
+    readerChangePending = false;
+    try { h.onReaderChange(); } catch (err) { console.error(err); }
+  });
+}
+
+function hostHotkeys() {
+  try { return host.hotkeys ? host.hotkeys() : []; } catch { return []; }
+}
+
+function loadBot() {
+  const base = desktop && desktop.bot && desktop.bot.base;
+  if (!base) return;
+  document.head.append(el('link', { rel: 'stylesheet', href: `${base}bot.css` }));
+  // In order, each after the one before, like the <script> tags above.
+  const files = ['core.js', 'twitch.js', 'eventsub.js', 'variables.js', 'effects.js', 'triggers.js', 'community.js', 'obs.js', 'relay.js', 'importers.js', 'ui.js', 'ui-tabs.js', 'ui-multistream.js', 'dashboard.js', 'integrations.js', 'shell.js', 'start.js'];
+  const next = (i) => {
+    if (i >= files.length) return;
+    const script = el('script', { src: `${base}${files[i]}` });
+    script.addEventListener('load', () => next(i + 1));
+    script.addEventListener('error', () => console.error(`Bot: couldn’t load ${files[i]}`));
+    document.body.append(script);
+  };
+  next(0);
+}
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 
@@ -3198,3 +3425,5 @@ renderNow();
   renderStatusLine();
   renderConnectButton();
 }
+
+loadBot();

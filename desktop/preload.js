@@ -2,7 +2,11 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-const version = (process.argv.find((arg) => arg.startsWith('--app-version=')) || '').split('=')[1] || '';
+const argValue = (name) => {
+  const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
+  return arg ? arg.slice(name.length + 3) : '';
+};
+const version = argValue('app-version');
 
 // The page runs unchanged in a browser, where this object simply isn't there.
 contextBridge.exposeInMainWorld('chatReaderDesktop', {
@@ -39,6 +43,38 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on('source:event', listener);
     return () => ipcRenderer.off('source:event', listener);
+  },
+
+  // The bot (desktop/bot/, docs/bot-plan.md). The page loads its scripts from
+  // `base`; everything else is what only the main process can do.
+  bot: {
+    base: argValue('bot-base'),
+    readStore: (name) => ipcRenderer.invoke('bot:store-read', name),
+    writeStore: (name, text) => ipcRenderer.send('bot:store-write', name, text),
+    getSecret: (name) => ipcRenderer.invoke('bot:secret-get', name),
+    setSecret: (name, value) => ipcRenderer.invoke('bot:secret-set', name, value),
+    secureStorage: () => ipcRenderer.invoke('bot:secure-storage'),
+    pickFile: (options) => ipcRenderer.invoke('bot:pick-file', options),
+    readFile: (file) => ipcRenderer.invoke('bot:read-file', file),
+    writeFile: (options) => ipcRenderer.invoke('bot:write-file', options),
+    http: (request) => ipcRenderer.invoke('bot:http', request),
+    notify: (title, body) => ipcRenderer.send('bot:notify', { title, body }),
+    configureOverlay: (options) => ipcRenderer.invoke('overlay:configure', options),
+    overlayStatus: () => ipcRenderer.invoke('overlay:status'),
+    sendOverlay: (event) => ipcRenderer.send('overlay:send', event),
+    setCatalog: (lists) => ipcRenderer.send('overlay:catalog', lists),
+    openOverlay: () => ipcRenderer.send('overlay:open'),
+    // Multistream: signing in to YouTube, posting to TikTok.
+    youtubeLogin: (clientId) => ipcRenderer.invoke('youtube:login', { clientId }),
+    cancelYoutubeLogin: () => ipcRenderer.invoke('youtube:cancel-login'),
+    tiktokSend: (handle, text) => ipcRenderer.invoke('tiktok:send', { handle, text }),
+    // Reading another bot's data to import: 'firebot-folder', 'firebot-setup' or 'mixitup'.
+    readImport: (kind) => ipcRenderer.invoke('import:read', { kind }),
+    onMainEvent: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on('bot:main-event', listener);
+      return () => ipcRenderer.off('bot:main-event', listener);
+    },
   },
 
   toggleWindow: () => ipcRenderer.send('window:toggle'),

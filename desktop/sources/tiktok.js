@@ -144,4 +144,37 @@ class TikTokChat extends EventEmitter {
   }
 }
 
-module.exports = { TikTokChat };
+// Posting to a TikTok LIVE chat, for the bot's multistream relay. TikTok has
+// no API for it: the connector sends it through Euler Stream's sign server,
+// which needs an API key with that feature and the account's session cookies
+// (sessionid, tt-target-idc). No socket is opened; only the room id is looked up.
+class TikTokSender {
+  async send(handle, text, { apiKey, sessionId, ttTargetIdc }) {
+    if (!apiKey || !sessionId || !ttTargetIdc) throw new Error('Sending to TikTok needs an Euler Stream API key and your session cookies (Bot → Multistream)');
+    const lib = await loadLibrary();
+    const key = `${handle}|${apiKey}|${sessionId}|${ttTargetIdc}`;
+    if (this.key !== key) {
+      this.key = key;
+      this.roomId = null;
+      this.connection = new lib.TikTokLiveConnection(handle, {
+        signApiKey: apiKey,
+        fetchRoomInfoOnConnect: false,
+        session: { cookie: { type: 'cookie', value: { sessionId, ttTargetIdc } } },
+      });
+    }
+    // A new stream gets a new room, so the id is looked up again now and then.
+    if (!this.roomId || Date.now() - this.roomAt > 10 * 60000) {
+      this.roomId = await this.connection.fetchRoomId();
+      this.roomAt = Date.now();
+    }
+    try {
+      await this.connection.sendMessage(String(text).slice(0, 150), this.roomId);
+    } catch (err) {
+      this.roomId = null;
+      if (lib.PremiumFeatureError && err instanceof lib.PremiumFeatureError) throw new Error('Euler Stream says your API key can’t send messages (it’s a paid feature there)');
+      throw err;
+    }
+  }
+}
+
+module.exports = { TikTokChat, TikTokSender };

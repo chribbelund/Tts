@@ -1,0 +1,130 @@
+/* The OBS overlay. Transparent, sized by the browser source (1920 × 1080). */
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+body { font: 600 36px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; }
+
+#stage {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template: 1fr 1fr 1fr / 1fr 1fr 1fr;
+  padding: 40px;
+  gap: 20px;
+}
+.pos { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
+.pos[data-pos$="left"], .pos[data-pos="left"] { align-items: flex-start; }
+.pos[data-pos$="right"], .pos[data-pos="right"] { align-items: flex-end; }
+.pos[data-pos="top"], .pos[data-pos="center"], .pos[data-pos="bottom"] { align-items: center; }
+.pos[data-pos^="top"] { justify-content: flex-start; }
+.pos[data-pos="left"], .pos[data-pos="center"], .pos[data-pos="right"] { justify-content: center; }
+.pos[data-pos^="bottom"] { justify-content: flex-end; }
+/* A middle-row item may be wider than its cell, e.g. a full-width video. */
+.pos[data-pos="top"], .pos[data-pos="center"], .pos[data-pos="bottom"] { grid-column: 2; }
+
+.item { max-width: 100%; text-align: center; }
+.alert { display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: min(1100px, 90vw); }
+.alert img, .alert video { max-width: 600px; max-height: 420px; object-fit: contain; }
+.alert-title {
+  font-size: var(--size, 36px);
+  color: var(--text, #fff);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, .8), 0 0 2px rgba(0, 0, 0, .9);
+  padding-bottom: 6px;
+  border-bottom: 4px solid var(--accent, #a37bff);
+}
+.alert-message {
+  font-size: calc(var(--size, 36px) * .7);
+  font-weight: 500;
+  color: var(--text, #fff);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, .8);
+  max-width: 900px;
+  overflow-wrap: anywhere;
+}
+.media img, .media video { display: block; max-width: 100%; }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; text-shadow: 0 2px 6px rgba(0, 0, 0, .8), 0 0 2px rgba(0, 0, 0, .9); }
+.text[data-bg="dark"] { background: rgba(10, 8, 20, .78); padding: .3em .6em; border-radius: 12px; text-shadow: none; }
+.text[data-bg="light"] { background: rgba(255, 255, 255, .9); color: #111 !important; padding: .3em .6em; border-radius: 12px; text-shadow: none; }
+
+#counter {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, .8);
+  white-space: nowrap;
+}
+#counter.bump { animation: bump .3s ease-out; }
+
+/* The combined chat (?chat): every platform's messages, newest at the bottom. */
+#chat {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  max-height: 100%;
+  margin: 0;
+  padding: 16px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: var(--chat-size, 26px);
+  font-weight: 500;
+  overflow: hidden;
+}
+#chat li {
+  padding: .35em .6em;
+  border-radius: 10px;
+  background: rgba(10, 8, 20, var(--chat-bg, .6));
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
+  overflow-wrap: anywhere;
+  animation: in-slide-up .35s ease-out both;
+}
+#chat li.out { animation: out-fade .5s ease-in both; }
+#chat .chat-platform {
+  display: inline-block;
+  font-size: .62em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: .1em .45em;
+  margin-right: .45em;
+  border-radius: 5px;
+  vertical-align: .15em;
+  color: #fff;
+  text-shadow: none;
+}
+#chat .chat-platform[data-platform="twitch"] { background: #9146ff; }
+#chat .chat-platform[data-platform="youtube"] { background: #e0262d; }
+#chat .chat-platform[data-platform="tiktok"] { background: #0e9f99; }
+#chat .chat-user { font-weight: 700; margin-right: .35em; }
+
+/* Coming in */
+.in-fade { animation: in-fade .5s ease-out both; }
+.in-slide-up { animation: in-slide-up .6s cubic-bezier(.2, .8, .2, 1) both; }
+.in-slide-down { animation: in-slide-down .6s cubic-bezier(.2, .8, .2, 1) both; }
+.in-slide-left { animation: in-slide-left .6s cubic-bezier(.2, .8, .2, 1) both; }
+.in-slide-right { animation: in-slide-right .6s cubic-bezier(.2, .8, .2, 1) both; }
+.in-zoom { animation: in-zoom .5s cubic-bezier(.2, .8, .2, 1.2) both; }
+.in-bounce { animation: in-bounce .9s both; }
+/* Going out */
+.out-fade { animation: out-fade .5s ease-in both; }
+.out-slide-up { animation: out-slide-up .5s ease-in both; }
+.out-slide-down { animation: out-slide-down .5s ease-in both; }
+.out-zoom { animation: out-zoom .45s ease-in both; }
+
+@keyframes in-fade { from { opacity: 0; } }
+@keyframes in-slide-up { from { opacity: 0; transform: translateY(120px); } }
+@keyframes in-slide-down { from { opacity: 0; transform: translateY(-120px); } }
+@keyframes in-slide-left { from { opacity: 0; transform: translateX(160px); } }
+@keyframes in-slide-right { from { opacity: 0; transform: translateX(-160px); } }
+@keyframes in-zoom { from { opacity: 0; transform: scale(.4); } }
+@keyframes in-bounce {
+  0% { opacity: 0; transform: scale(.3); }
+  50% { opacity: 1; transform: scale(1.08); }
+  70% { transform: scale(.95); }
+  100% { transform: scale(1); }
+}
+@keyframes out-fade { to { opacity: 0; } }
+@keyframes out-slide-up { to { opacity: 0; transform: translateY(-120px); } }
+@keyframes out-slide-down { to { opacity: 0; transform: translateY(120px); } }
+@keyframes out-zoom { to { opacity: 0; transform: scale(.4); } }
+@keyframes bump { 50% { transform: scale(1.15); } }
