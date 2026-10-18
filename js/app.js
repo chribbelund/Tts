@@ -205,6 +205,9 @@ function selectSettingsTab(name, { focus = false } = {}) {
 }
 
 function openSettings(tab) {
+  // The desktop app shows the same sections as pages of its own window.
+  const shell = window.chatReaderHost && window.chatReaderHost.showSettings;
+  if (shell) { shell(tab || ''); return; }
   if (tab) selectSettingsTab(tab);
   if (!settingsDialog.open) settingsDialog.showModal();
   if (!tab) settingsTabs.find((t) => t.getAttribute('aria-selected') === 'true').focus();
@@ -1013,7 +1016,10 @@ function applyReward(entry) {
   if (rewardLink.action) linkReward(entry);
   const reward = settings.rewards[entry.rewardId];
   if (!reward) return;
-  if (reward.action === 'voice') entry.handled = pickVoice(entry, entry.rawText);
+  if (reward.action === 'voice') {
+    entry.handled = pickVoice(entry, entry.rawText);
+    readerCommandDone(entry, 'voice', entry.rawText);
+  }
   else if (reward.action === 'priority') entry.priority = true;
   else if (VOICE_EFFECTS[reward.action]) entry.effect = reward.action;
 }
@@ -1032,10 +1038,20 @@ function runChatCommand(entry) {
   const voiceArgs = commandArgs(entry.rawText, settings.voiceCommand);
   if (voiceArgs !== null && mayUse(entry, settings.voiceCommandWho)) {
     entry.handled = pickVoice(entry, voiceArgs);
+    readerCommandDone(entry, 'voice', voiceArgs);
     return;
   }
   const modArgs = commandArgs(entry.rawText, settings.modCommand);
-  if (modArgs !== null && mayUse(entry, settings.modCommandWho)) entry.handled = runModCommand(modArgs);
+  if (modArgs !== null && mayUse(entry, settings.modCommandWho)) {
+    entry.handled = runModCommand(modArgs);
+    readerCommandDone(entry, 'mod', modArgs);
+  }
+}
+
+// The page can't write in chat; the desktop app's bot can answer for it.
+function readerCommandDone(entry, kind, args) {
+  if (!host.onReaderCommand || !entry.handled) return;
+  try { host.onReaderCommand(entry, { kind, args, result: entry.handled }); } catch (err) { console.error(err); }
 }
 
 // "!tts volume 40", "!tts volume +10", "!tts speed 1.2". Unknown words return
@@ -1444,7 +1460,7 @@ function addToFeed(entry) {
     entry.effect ? VOICE_EFFECTS[entry.effect].label.toLowerCase() : null,
     entry.priority ? 'read first' : null,
   ].filter(Boolean);
-  const label = { event: 'Event', notice: 'Reader' }[entry.kind];
+  const label = entry.label || { event: 'Event', notice: 'Reader' }[entry.kind];
   const meta = el('div', { class: 'meta' },
     platformTag(entry),
     label ? el('span', { class: 'reply-to' }, label) : name,
@@ -1524,6 +1540,7 @@ const nowPanel = $('#nowPanel');
 const nowBar = $('#nowBar');
 
 function renderNow() {
+  readerChanged();
   const entry = reader.current;
   const state = reader.paused ? 'paused' : entry ? 'speaking' : 'idle';
   nowPanel.dataset.state = state;
@@ -1653,6 +1670,7 @@ function renderConnection(chat, state, text) {
 // One line for every chat: the ones being read are named together, anything
 // else (connecting, waiting for a stream, an error) says which chat it is.
 function renderStatusLine() {
+  readerChanged();
   const shown = chats.filter((c) => isActive(c) || c.state === 'error');
   const connected = shown.filter((c) => c.state === 'connected');
   const others = shown.filter((c) => c.state !== 'connected');
@@ -1710,6 +1728,7 @@ function renderVoiceChip(kokoroState = kokoroEngine.state, info = {}) {
   else text = 'Neural voices not loaded · using system voices';
   chip.dataset.state = state;
   $('#voiceChipText').textContent = text;
+  readerChanged();
   chip.setAttribute('aria-label', `${text}. Open voice settings.`);
 }
 
@@ -1966,7 +1985,7 @@ function previewNickname(login) {
 // ---------------------------------------------------------------------------
 
 const chatterDialog = $('#chatterDialog');
-const chatter = { login: '', displayName: '', opener: null };
+const chatter = { login: '', displayName: '', opener: null, entry: null };
 
 const ignoredList = () => settings.ignoredUsers.toLowerCase().split(/[\s,]+/).filter(Boolean);
 const isIgnored = (login) => ignoredList().includes(login);
@@ -2016,14 +2035,25 @@ function saveChatterNickname() {
 
 function openChatter(entry, opener) {
   if (!entry.login) return;
-  Object.assign(chatter, { login: entry.login, displayName: entry.displayName || entry.login, opener });
+  Object.assign(chatter, { login: entry.login, displayName: entry.displayName || entry.login, opener, entry });
   $('#chatterTitle').textContent = chatter.displayName;
   $('#chatterNick').value = settings.nicknames[chatter.login] || '';
   renderChatterVoices();
   renderChatterIgnore();
+  renderChatterExtra();
   chatterDialog.showModal();
   $('#chatterNick').focus();
   $('#chatterNick').select();
+}
+
+// In the desktop app the bot adds the viewer's points, watch time and
+// moderation buttons.
+function renderChatterExtra() {
+  const box = $('#chatterExtra');
+  let part = null;
+  try { part = host.chatterExtra ? host.chatterExtra(chatter.entry) : null; } catch (err) { console.error(err); }
+  box.replaceChildren(...(part ? [part] : []));
+  box.hidden = !part;
 }
 
 $('#chatterForm').addEventListener('submit', (e) => { e.preventDefault(); chatterDialog.close(); });
@@ -3197,6 +3227,10 @@ const host = {
   onRemoteMessage: null,  // (entry, raw) for YouTube and TikTok chat
   onAction: null,         // ('bot:…') from a hotkey
   hotkeys: null,          // () => [['bot:…', binding], …]
+  showSettings: null,     // (tab) shows a settings section instead of the dialog
+  chatterExtra: null,     // (entry) => a node for the chatter dialog, or null
+  onReaderCommand: null,  // (entry, { kind, args, result }) after !voice or !tts
+  onReaderChange: null,   // () when reading, the queue, the chats or the voices change
 
   settings,
   el,
@@ -3255,6 +3289,61 @@ const host = {
   clear: () => clearQueue(),
   setVolume: (n) => setVolume(n),
   setRate: (n) => setRate(n),
+  voiceStatus: () => ({ engine: settings.engine, state: $('#voiceChip').dataset.state, text: $('#voiceChipText').textContent }),
+  current: () => (reader.current ? { displayName: reader.current.displayName, text: reader.current.displayText || '', kind: reader.current.kind } : null),
+
+  // Chatters: the voice and nickname the reader uses for them.
+  chatterVoice(login) {
+    const engine = activeEngine();
+    return voiceName(engine, voiceIdFor(String(login || '').toLowerCase(), engine));
+  },
+  // A voice by name from every voice of the engine, kept like a click on the
+  // voice tag. Returns its name, or '' when there's no such voice.
+  setChatterVoice(login, name) {
+    const engine = activeEngine();
+    const user = String(login || '').toLowerCase().replace(/^@/, '');
+    if (!user) return '';
+    const q = String(name || '').trim();
+    const id = q ? (findVoice(engine, q) || host.voices(engine).find((v) => v.name.toLowerCase().includes(q.toLowerCase()))?.id) : null;
+    if (q && !id) return '';
+    if (!q) {
+      const pool = voicePool(engine);
+      setUserVoice(user, engine, pool[(pool.indexOf(voiceIdFor(user, engine)) + 1) % pool.length]);
+    } else {
+      setUserVoice(user, engine, id);
+    }
+    return host.chatterVoice(user);
+  },
+  nickname: (login) => settings.nicknames[String(login || '').toLowerCase()] || '',
+  setNickname: (login, nickname) => {
+    const user = String(login || '').toLowerCase().replace(/^@/, '');
+    if (user) setNickname(user, String(nickname || '').trim().slice(0, 60));
+  },
+  isIgnored: (login) => isIgnored(String(login || '').toLowerCase()),
+  setIgnored: (login, on) => setIgnored(String(login || '').toLowerCase(), !!on),
+
+  // The reader's own channel point rewards (Viewer controls), by reward id.
+  rewardActions: () => Object.entries(REWARD_ACTIONS).map(([id, a]) => ({ id, name: a.name, label: a.label })),
+  readerRewards: () => settings.rewards,
+  setReaderReward(id, title, action) {
+    if (!action) delete settings.rewards[id];
+    else settings.rewards[id] = { name: String(title || REWARD_ACTIONS[action].name).slice(0, 60), action };
+    saveSettings();
+    renderRewards();
+  },
+
+  // A line in the chat list that isn't read out: a follow, a redemption…
+  feedNote(text, { label = 'Bot', tag = '', platform = '' } = {}) {
+    const body = String(text || '').trim();
+    if (!body) return;
+    const entry = {
+      id: `note-${Date.now()}-${entrySeq + 1}`, uid: ++entrySeq, kind: 'notice', label, platform,
+      login: '', displayName: label, rawText: body, displayText: body, speechBody: '',
+    };
+    addToFeed(entry);
+    entry.node.classList.add('bot-note');
+    setStatus(entry, 'info', tag);
+  },
   syncHotkeys: () => syncGlobalHotkeys(),
   hotkeyProblems: () => (settings.globalHotkeys ? globalHotkeys.problems : {}),
   // Backups: what the bot adds to the settings file, and how it reads it back.
@@ -3263,6 +3352,19 @@ const host = {
   importReaderSettings: (raw) => importReaderSettings(raw),
 };
 window.chatReaderHost = host;
+
+// The bot's dashboard follows the player and the chats. Lots of changes come
+// at once, so it's told once per frame at most.
+let readerChangePending = false;
+function readerChanged() {
+  const h = window.chatReaderHost;
+  if (!h || !h.onReaderChange || readerChangePending) return;
+  readerChangePending = true;
+  requestAnimationFrame(() => {
+    readerChangePending = false;
+    try { h.onReaderChange(); } catch (err) { console.error(err); }
+  });
+}
 
 function hostHotkeys() {
   try { return host.hotkeys ? host.hotkeys() : []; } catch { return []; }
@@ -3273,7 +3375,7 @@ function loadBot() {
   if (!base) return;
   document.head.append(el('link', { rel: 'stylesheet', href: `${base}bot.css` }));
   // In order, each after the one before, like the <script> tags above.
-  const files = ['core.js', 'twitch.js', 'eventsub.js', 'variables.js', 'effects.js', 'triggers.js', 'community.js', 'obs.js', 'relay.js', 'importers.js', 'ui.js', 'ui-tabs.js', 'ui-multistream.js', 'start.js'];
+  const files = ['core.js', 'twitch.js', 'eventsub.js', 'variables.js', 'effects.js', 'triggers.js', 'community.js', 'obs.js', 'relay.js', 'importers.js', 'ui.js', 'ui-tabs.js', 'ui-multistream.js', 'dashboard.js', 'integrations.js', 'shell.js', 'start.js'];
   const next = (i) => {
     if (i >= files.length) return;
     const script = el('script', { src: `${base}${files[i]}` });

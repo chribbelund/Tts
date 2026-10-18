@@ -224,6 +224,15 @@ def('chatMessages', 'Viewers', 'How many chat messages they’ve sent', (ctx, [n
   const v = Bot.viewersDb.byLogin(subjectLogin(ctx, name), ctx.user && !name ? ctx.user.platform : 'twitch');
   return v ? v.messages || 0 : 0;
 }, '$chatMessages');
+// The reader: how it says a chatter, and what it's doing.
+def('ttsVoice', 'Reader', 'The voice the reader uses for the chatter, or the user named: $ttsVoice[name]', (ctx, [name = '']) => Bot.host.chatterVoice(subjectLogin(ctx, name)), '$ttsVoice');
+def('nickname', 'Reader', 'The name the reader says for them: their nickname, or their own name', (ctx, [name = '']) => {
+  const login = subjectLogin(ctx, name);
+  return Bot.host.nickname(login) || (ctx.user && !name ? ctx.user.displayName || ctx.user.login : login);
+}, '$nickname');
+def('ttsVoices', 'Reader', 'The voices in the reader’s pool, separated by commas', () => Bot.host.voices().filter((v) => v.inPool).map((v) => v.name).join(', '));
+def('ttsWaiting', 'Reader', 'How many messages are waiting to be read', () => Bot.host.state().waiting);
+def('ttsPaused', 'Reader', '“true” while the reader is paused', () => String(Bot.host.state().paused));
 def('randomViewer', 'Viewers', 'Someone who chatted in the last 15 minutes', () => {
   const recent = Bot.viewersDb.recentChatters(15);
   const pick = recent[Math.floor(Math.random() * recent.length)];

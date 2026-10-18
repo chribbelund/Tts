@@ -1,24 +1,8 @@
-/* The Bot workspace (desktop app only). Uses the colour tokens and the
-   dialog, tab and field styles of style.css. */
-
-/* ---------- the button in the top bar ---------- */
-.bot-btn { position: relative; }
-.bot-icon { display: inline-flex; }
-.bot-icon svg { width: 16px; height: 16px; fill: currentColor; }
-.bot-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
-.bot-dot[data-state="on"] { background: var(--ok); }
-.bot-dot[data-state="connecting"] { background: var(--warn); animation: blink 1s infinite; }
-.bot-dot[data-state="error"] { background: var(--bad); }
+/* The desktop app's window: the sections down the side, the Dashboard and
+   the bot's pages. Uses the colour tokens and the dialog, tab and field
+   styles of style.css. Never loaded by the website. */
 
 /* ---------- dialogs ---------- */
-.bot-dialog { width: min(1180px, calc(100% - 24px)); height: min(860px, calc(100% - 24px)); }
-.bot-dialog .dialog-body { grid-template-columns: 190px minmax(0, 1fr); }
-.bot-head-status { margin-left: 12px; margin-right: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-.bot-head-status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
-.bot-head-status[data-state="on"]::before { background: var(--ok); }
-.bot-head-status[data-state="error"]::before { background: var(--bad); }
-.bot-head-status[data-state="connecting"]::before { background: var(--warn); }
-
 .bot-editor { width: min(860px, calc(100% - 24px)); height: min(820px, calc(100% - 24px)); }
 .bot-editor .dialog-box { display: flex; flex-direction: column; }
 .bot-editor-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
@@ -28,9 +12,9 @@
 :root[data-width="narrow"] .bot-editor { width: 100%; height: 100%; border-radius: 0; border: 0; }
 
 /* Inputs look the same everywhere in the bot, not only in settings tabs. */
-.bot-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.bot-scope input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
 .bot-editor input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
-.bot-dialog select, .bot-editor select, .bot-dialog textarea, .bot-editor textarea {
+.bot-scope select, .bot-editor select, .bot-scope textarea, .bot-editor textarea {
   min-width: 0;
   padding: 5px 8px;
   border: 1px solid var(--line);
@@ -39,14 +23,14 @@
   font-size: 13px;
   color: var(--fg);
 }
-.bot-dialog textarea, .bot-editor textarea { width: 100%; resize: vertical; font-family: inherit; }
-.bot-dialog input:focus-visible, .bot-editor input:focus-visible,
-.bot-dialog select:focus-visible, .bot-editor select:focus-visible,
-.bot-dialog textarea:focus-visible, .bot-editor textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
-.bot-dialog input[type="color"], .bot-editor input[type="color"] { width: 44px; height: 30px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }
-.bot-dialog input.short, .bot-editor input.short { width: 90px; }
-.bot-dialog input[type="number"], .bot-editor input[type="number"] { width: 100px; }
-.mono, .bot-dialog code, .bot-editor code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+.bot-scope textarea, .bot-editor textarea { width: 100%; resize: vertical; font-family: inherit; }
+.bot-scope input:focus-visible, .bot-editor input:focus-visible,
+.bot-scope select:focus-visible, .bot-editor select:focus-visible,
+.bot-scope textarea:focus-visible, .bot-editor textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.bot-scope input[type="color"], .bot-editor input[type="color"] { width: 44px; height: 30px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }
+.bot-scope input.short, .bot-editor input.short { width: 90px; }
+.bot-scope input[type="number"], .bot-editor input[type="number"] { width: 100px; }
+.mono, .bot-scope code, .bot-editor code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 
 .bot-status:empty { display: none; }
 .bot-status.bad, .hint.bad, .warn-text { color: var(--bad); }
@@ -186,3 +170,91 @@ p.code-box { display: block; }
 .bot-quota progress { width: 100%; max-width: 360px; accent-color: var(--accent); }
 
 [data-contrast="high"] .bot-card, [data-contrast="high"] .fx-card, [data-contrast="high"] .bot-table-wrap { border-width: var(--border-strong); }
+
+/* ---------- the window: sections down the side ---------- */
+.app-shell { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr); }
+.app-nav { min-height: 0; overflow-y: auto; padding: 10px 10px 24px; border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
+.app-nav-head { margin: 14px 10px 3px; font-size: 11px; }
+.app-nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.app-nav-btn { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; border: 0; background: none; padding: 5px 10px; border-radius: 7px; color: var(--muted); font-weight: 550; cursor: pointer; }
+.app-nav-btn:hover { color: var(--fg); background: var(--panel-2); }
+.app-nav-btn:focus-visible { outline-offset: -2px; }
+.app-nav-btn[aria-current="page"] { color: var(--accent); background: var(--accent-soft); }
+.app-nav-list[data-group=""] .app-nav-btn { font-weight: 650; color: var(--fg); }
+.app-nav-list[data-group=""] .app-nav-btn[aria-current="page"] { color: var(--accent); }
+.app-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-nav-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.app-nav-dot[data-state="on"] { background: var(--ok); }
+.app-nav-dot[data-state="error"] { background: var(--bad); }
+.app-nav-dot[data-state="off"], .app-nav-dot[data-state="connecting"] { background: var(--warn); }
+.app-nav-dot[data-state="connecting"] { animation: blink 1s infinite; }
+
+.app-view { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.app-pages { flex: 1; min-height: 0; overflow-y: auto; }
+.app-page { max-width: 940px; margin: 0 auto; padding: 22px 28px 48px; display: flex; flex-direction: column; gap: 18px; }
+.app-page-head h2 { font-size: 20px; text-transform: none; letter-spacing: -.01em; color: var(--fg); font-weight: 680; }
+.app-page-head h2:focus { outline: none; }
+.app-page-head .hint { margin-top: 4px; font-size: 13px; }
+.app-page .tab-panel { padding: 0; }
+.page-part + .page-part { border-top: 1px solid var(--line); padding-top: 18px; }
+.page-part:empty { display: none; }
+
+/* ---------- the dashboard ---------- */
+.has-shell .layout.dash { flex: 1; max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: 16px; padding: 16px; }
+.dash-main { min-height: 0; display: flex; flex-direction: column; gap: 16px; }
+.dash-side { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.dash-part { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; flex: none; }
+.dash-part:empty { display: none; }
+.dash-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dash-head .sub-head { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.dash-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dash-card { text-align: left; cursor: pointer; font: inherit; color: inherit; padding: 8px 10px; }
+.dash-card:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); border-left-color: inherit; }
+.dash-card .bot-card-value { font-size: 14px; }
+.dash-card .hint { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bot-card[data-state="connecting"] { border-left-color: var(--warn); }
+.dash-chat-opts { display: flex; gap: 8px; flex-wrap: wrap; }
+.dash-chat-opts select { flex: 1; }
+.dash-side .bot-chat-send input { min-width: 0; }
+.dash-side .bot-activity { max-height: 340px; }
+.dash-side .field input { width: 100%; }
+
+/* Medium and narrow: one column. The page scrolls and chat keeps a good height. */
+:root:not([data-width="wide"]) .has-shell .layout.dash { display: flex; flex-direction: column; overflow-y: auto; }
+:root:not([data-width="wide"]) .dash-main { flex: none; }
+:root:not([data-width="wide"]) .dash-main .feed-panel { flex: none; height: 62vh; }
+:root:not([data-width="wide"]) .dash-side { overflow: visible; }
+:root[data-width="medium"] .app-shell { grid-template-columns: 172px minmax(0, 1fr); }
+
+/* Narrow: the sections become a row that scrolls sideways. */
+:root[data-width="narrow"] .app-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+:root[data-width="narrow"] .app-nav { flex-direction: row; align-items: center; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 6px 8px; gap: 4px; }
+:root[data-width="narrow"] .app-nav-head { display: none; }
+:root[data-width="narrow"] .app-nav-list { flex-direction: row; gap: 2px; flex: none; }
+:root[data-width="narrow"] .app-nav-list + .app-nav-list { border-left: 1px solid var(--line); padding-left: 4px; }
+:root[data-width="narrow"] .app-nav-btn { white-space: nowrap; }
+:root[data-width="narrow"] .app-page { padding: 16px; }
+:root[data-width="narrow"] .has-shell .layout.dash { padding: 10px; gap: 10px; }
+:root[data-width="narrow"] .dash-cards { grid-template-columns: 1fr; }
+
+/* ---------- the bot in the reader's own screens ---------- */
+/* Follows, redemptions and the bot's notes between the chat messages. */
+.msg.bot-note { background: color-mix(in srgb, var(--accent) 5%, transparent); border-left-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.msg.bot-note .text { font-style: italic; }
+.msg.bot-note .reply-to { color: var(--accent); font-weight: 600; }
+
+/* The chatter dialog's part from the bot. */
+.chatter-extra { border-top: 1px solid var(--line); padding-top: 14px; }
+.chatter-bot { display: flex; flex-direction: column; gap: 10px; }
+.chatter-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+.chatter-stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; display: flex; flex-direction: column; min-width: 0; }
+.chatter-stat-label { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.chatter-stat-value { font-weight: 650; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chatter-bot .bot-actions .row-label { margin-right: 2px; }
+
+[data-contrast="high"] .dash-part, [data-contrast="high"] .chatter-stat, [data-contrast="high"] .app-nav { border-width: var(--border-strong); }
+[data-contrast="high"] .app-nav-btn { color: var(--fg); }
+[data-contrast="high"] .app-nav-btn[aria-current="page"] { box-shadow: inset 3px 0 0 var(--accent); }
+/* With the bot's part the chatter dialog is a little wider, and scrolls. */
+.has-shell .chatter-dialog { width: min(500px, calc(100% - 32px)); }
+.has-shell .chatter-dialog .chatter-body { overflow-y: auto; max-height: calc(100vh / var(--ui-zoom) - 140px); }

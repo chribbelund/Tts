@@ -1,12 +1,12 @@
 'use strict';
 
-// The Bot workspace: a big dialog with one tab per part of the bot, opened
-// from the "Bot" button the app adds to the top bar. This file has the
-// pieces every tab uses — form controls, the effect list editor, the
-// conditions editor, the variable picker and the item editor dialog. The
-// tabs themselves are in ui-tabs.js.
+// The pieces every part of the bot's screens uses — form controls, the
+// effect list editor, the conditions editor, the variable picker and the item
+// editor dialog. The tabs themselves are in ui-tabs.js and the others; the
+// window they're shown in (the sections down the side and the Dashboard) is
+// shell.js.
 
-const UI = Bot.ui = { tabs: [], current: 'dashboard', rewardsCache: null };
+const UI = Bot.ui = { tabs: [], rewardsCache: null };
 const h = Bot.host.el;
 let idSeq = 0;
 const nid = () => `bot-f${++idSeq}`;
@@ -500,7 +500,7 @@ UI.edit = (spec) => {
       status,
       spec.onTest ? UI.button('▶ Try it', async () => {
         UI.say(status, 'Running…');
-        try { await spec.onTest(item); UI.say(status, 'Done. Anything that went wrong is in Dashboard → Log.'); } catch (err) { UI.say(status, err.message, true); }
+        try { await spec.onTest(item); UI.say(status, 'Done. Anything that went wrong is in the log, at the bottom of the Dashboard.'); } catch (err) { UI.say(status, err.message, true); }
       }) : null,
       UI.button('Cancel', close),
       UI.button(spec.saveLabel || 'Save', save, { cls: 'btn small primary' }))));
@@ -519,7 +519,8 @@ UI.edit = (spec) => {
 };
 
 // ---------------------------------------------------------------------------
-// The workspace dialog and the button in the top bar
+// Tabs: each part of the bot, drawn into the page of the window shell.js
+// puts it on. A page can hold a reader section and a bot tab together.
 // ---------------------------------------------------------------------------
 
 UI.addTab = (id, label, render, { listens = [], after = '' } = {}) => {
@@ -527,76 +528,46 @@ UI.addTab = (id, label, render, { listens = [], after = '' } = {}) => {
   UI.tabs.splice(at === -1 ? UI.tabs.length : at + 1, 0, { id, label, render, listens });
 };
 
-UI.init = () => {
-  const dot = h('span', { class: 'bot-dot', 'aria-hidden': 'true' });
-  UI.button_ = h('button', {
-    type: 'button', id: 'botBtn', class: 'btn icon-btn bot-btn', 'aria-haspopup': 'dialog', title: 'Commands, alerts, points and the rest of the bot',
-    onclick: () => UI.open(),
-  }, dot, h('span', { class: 'bot-icon', 'aria-hidden': 'true' }), h('span', {}, 'Bot'));
-  // Parsed as markup so the icon is a real SVG element.
-  UI.button_.querySelector('.bot-icon').innerHTML = '<svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="13" r="1.6"/><circle cx="15" cy="13" r="1.6"/><path d="M12 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-  UI.dot = dot;
-  document.querySelector('#settingsBtn').before(UI.button_);
+UI.tab = (id) => UI.tabs.find((t) => t.id === id) || null;
 
-  const tablist = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Bot sections', 'aria-orientation': 'vertical' });
-  const panels = h('div', { class: 'tab-panels' });
-  UI.dialog = h('dialog', { class: 'settings-dialog bot-dialog', 'aria-labelledby': 'botTitle' },
-    h('div', { class: 'dialog-box' },
-      h('header', { class: 'dialog-head' },
-        h('h2', { id: 'botTitle' }, 'Bot'),
-        h('span', { class: 'bot-head-status', id: 'botHeadStatus' }),
-        UI.button('✕', () => UI.dialog.close(), { cls: 'x close-btn', aria: 'Close the bot' })),
-      h('div', { class: 'dialog-body' }, tablist, panels)));
-  document.body.append(UI.dialog);
-  UI.dialog.addEventListener('click', (e) => { if (e.target === UI.dialog) UI.dialog.close(); });
-  UI.dialog.addEventListener('close', () => UI.button_.focus());
+// On screen: its page is the one showing.
+UI.isShown = (tab) => !!(tab && tab.panel && Bot.shell && Bot.shell.showing(tab.id));
 
-  for (const tab of UI.tabs) {
-    tab.button = h('button', { type: 'button', role: 'tab', id: `bot-tab-${tab.id}`, 'aria-controls': `bot-panel-${tab.id}`, 'aria-selected': 'false', tabindex: '-1' }, tab.label);
-    tab.button.addEventListener('click', () => UI.select_(tab.id));
-    tab.panel = h('section', { class: 'tab-panel', role: 'tabpanel', id: `bot-panel-${tab.id}`, 'aria-labelledby': `bot-tab-${tab.id}`, tabindex: '0', hidden: true });
-    // Tabs append optional parts as `cond ? node : null`; leave the nulls out.
-    tab.panel.append = (...nodes) => Element.prototype.append.apply(tab.panel, nodes.filter((n) => n !== null && n !== undefined && n !== false && n !== ''));
-    tablist.append(tab.button);
-    panels.append(tab.panel);
-    // Things that change on their own (a new follower, the viewer list) redraw
-    // the tab, unless the streamer is typing in it.
-    // Several changes in a row (a busy chat) are drawn once.
-    let redraw = null;
-    for (const type of tab.listens) {
-      Bot.on(type, () => {
-        if (UI.current !== tab.id || !UI.dialog.open || redraw) return;
-        redraw = setTimeout(() => {
-          redraw = null;
-          if (UI.current !== tab.id || !UI.dialog.open) return;
-          if (tab.panel.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) { tab.stale = true; return; }
-          UI.renderTab(tab);
-        }, 250);
-      });
-    }
+// The box a tab is drawn into, made by shell.js.
+UI.mount = (tab, panel) => {
+  tab.panel = panel;
+  // Tabs append optional parts as `cond ? node : null`; leave the nulls out.
+  panel.append = (...nodes) => Element.prototype.append.apply(panel, nodes.filter((n) => n !== null && n !== undefined && n !== false && n !== ''));
+  // Things that change on their own (a new follower, the viewer list) redraw
+  // the tab, unless the streamer is typing in it. Several changes in a row
+  // (a busy chat) are drawn once.
+  let redraw = null;
+  for (const type of tab.listens) {
+    Bot.on(type, () => {
+      if (!UI.isShown(tab) || redraw) return;
+      redraw = setTimeout(() => {
+        redraw = null;
+        if (!UI.isShown(tab)) return;
+        if (panel.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) { tab.stale = true; return; }
+        UI.renderTab(tab);
+      }, 250);
+    });
   }
-  tablist.addEventListener('keydown', (e) => {
-    const i = UI.tabs.findIndex((t) => t.button === document.activeElement);
-    if (i < 0) return;
-    const last = UI.tabs.length - 1;
-    const next = { ArrowDown: i + 1, ArrowRight: i + 1, ArrowUp: i - 1, ArrowLeft: i - 1, Home: 0, End: last }[e.key];
-    if (next === undefined) return;
-    e.preventDefault();
-    const tab = UI.tabs[(next + last + 1) % (last + 1)];
-    UI.select_(tab.id);
-    tab.button.focus();
+  panel.addEventListener('focusout', () => {
+    if (tab.stale) setTimeout(() => { if (!panel.contains(document.activeElement) && UI.isShown(tab)) { tab.stale = false; UI.renderTab(tab); } }, 0);
   });
-  panels.addEventListener('focusout', () => {
-    const tab = UI.tabs.find((t) => t.id === UI.current);
-    if (tab && tab.stale) setTimeout(() => { if (!tab.panel.contains(document.activeElement)) { tab.stale = false; UI.renderTab(tab); } }, 0);
-  });
+};
 
-  for (const type of ['eventsub', 'accounts', 'live']) Bot.on(type, UI.renderDot);
-  UI.renderDot();
+UI.init = () => {
+  Bot.shell.init();
+  for (const type of ['eventsub', 'accounts', 'live', 'obs', 'overlay', 'relay']) Bot.on(type, () => Bot.shell.renderStatus());
+  Bot.shell.renderStatus();
 };
 
 UI.renderTab = (tab) => {
-  const scroll = tab.panel.parentElement.scrollTop;
+  if (!tab.panel) return;
+  const scroller = tab.panel.closest('.app-pages, .dash-side');
+  const scroll = scroller ? scroller.scrollTop : 0;
   // Redrawing replaces every control, so keyboard focus goes back to the one
   // with the same label.
   const focused = tab.panel.contains(document.activeElement) ? document.activeElement : null;
@@ -606,50 +577,21 @@ UI.renderTab = (tab) => {
     tab.render(tab.panel);
   } catch (err) {
     console.error(err);
-    tab.panel.append(h('p', { class: 'warn' }, `Something went wrong drawing this tab: ${err.message}`));
+    tab.panel.append(h('p', { class: 'warn' }, `Something went wrong drawing this part: ${err.message}`));
   }
-  tab.panel.parentElement.scrollTop = scroll;
+  if (scroller) scroller.scrollTop = scroll;
   if (focusLabel) {
     const again = [...tab.panel.querySelectorAll('button, input, select, textarea')].find((x) => (x.getAttribute('aria-label') || x.textContent) === focusLabel);
     if (again) again.focus();
   }
 };
 
-UI.select_ = (id) => {
-  UI.current = id;
-  for (const tab of UI.tabs) {
-    const on = tab.id === id;
-    tab.button.setAttribute('aria-selected', String(on));
-    tab.button.tabIndex = on ? 0 : -1;
-    tab.panel.hidden = !on;
-    if (on) UI.renderTab(tab);
-  }
-  UI.dialog.querySelector('.tab-panels').scrollTop = 0;
-  Bot.data.ui.tab = id;
-  Bot.save();
-};
-
-UI.open = (tab) => {
-  if (!UI.dialog.open) UI.dialog.showModal();
-  UI.select_(tab || (Bot.twitch.loggedIn() ? Bot.data.ui.tab || 'dashboard' : 'account'));
-  const selected = UI.tabs.find((t) => t.id === UI.current);
-  if (selected) selected.button.focus();
-};
+// Older names for showing a part of the window, used all over the tabs.
+UI.select_ = (id) => Bot.shell.show(id);
+UI.open = (id) => Bot.shell.show(id || 'dashboard');
 
 UI.rerender = () => {
-  const tab = UI.tabs.find((t) => t.id === UI.current);
-  if (tab && UI.dialog && UI.dialog.open) UI.renderTab(tab);
-};
-
-UI.renderDot = () => {
-  const es = Bot.eventsub.state;
-  const state = !Bot.twitch.loggedIn() ? 'off' : es === 'connected' ? 'on' : es === 'error' ? 'error' : 'connecting';
-  UI.dot.dataset.state = state;
-  const text = { off: 'Not logged in to Twitch', on: `${Bot.twitch.accounts.streamer ? Bot.twitch.accounts.streamer.displayName : ''} · ${Bot.community.live ? 'live' : 'offline'}`, error: Bot.eventsub.text, connecting: 'Connecting…' }[state];
-  UI.button_.title = `Bot: ${text}`;
-  UI.button_.setAttribute('aria-label', `Bot. ${text}`);
-  const head = document.getElementById('botHeadStatus');
-  if (head) { head.textContent = text; head.dataset.state = state; }
+  for (const tab of UI.tabs) if (UI.isShown(tab)) UI.renderTab(tab);
 };
 
 UI.loadRewards = async () => {
@@ -679,4 +621,4 @@ UI.lead = (text) => h('p', { class: 'hint bot-lead' }, text);
 
 // Logged out, most tabs can still be set up, but say why nothing happens.
 UI.needsLogin = () => (Bot.twitch.loggedIn() ? null : h('p', { class: 'warn bot-login-note' },
-  'Log in to Twitch under ', UI.button('Account', () => UI.select_('account'), { cls: 'link' }), ' for this to work on your channel.'));
+  'Log in to Twitch under ', UI.button('Accounts', () => UI.select_('account'), { cls: 'link' }), ' for this to work on your channel.'));

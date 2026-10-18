@@ -269,6 +269,38 @@ type('reader', {
   },
 });
 
+// What the reader does for one chatter, the same things a click on their
+// name in chat changes. With a channel point reward that asks for text,
+// "Their voice" + $message is a "pick your TTS voice" reward.
+type('ttsChatter', {
+  name: 'Change how a chatter is read', category: 'Reader', icon: '🎙️',
+  fields: [
+    { key: 'action', label: 'Change', type: 'select', options: [['voice', 'Their voice, to the one named'], ['nextVoice', 'Their voice, to the next one in the pool'], ['nickname', 'Their nickname'], ['clearNickname', 'Remove their nickname'], ['ignore', 'Stop reading them'], ['unignore', 'Read them again']], default: 'voice' },
+    userField('Chatter'),
+    { key: 'value', label: 'Voice name or nickname', type: 'text', vars: true, default: '$message', showIf: (e) => e.action === 'voice' || e.action === 'nickname' },
+  ],
+  summary: (e) => `${e.action} · ${e.username}`,
+  async run(e, ctx) {
+    const login = (await render(e.username || '$username', ctx)).trim().replace(/^@/, '').toLowerCase();
+    if (!login) throw new Error('no chatter given');
+    const value = (await render(e.value, ctx)).trim();
+    const host = Bot.host;
+    if (e.action === 'voice' || e.action === 'nextVoice') {
+      if (e.action === 'voice' && !value) throw new Error('no voice name given');
+      const name = host.setChatterVoice(login, e.action === 'voice' ? value : '');
+      if (!name) throw new Error(`there’s no voice called “${value}”`);
+      ctx.outputs.voice = name;
+    } else if (e.action === 'nickname') {
+      if (!value) throw new Error('no nickname given');
+      host.setNickname(login, value);
+    } else if (e.action === 'clearNickname') {
+      host.setNickname(login, '');
+    } else {
+      host.setIgnored(login, e.action === 'ignore');
+    }
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Sound and overlay
 // ---------------------------------------------------------------------------
@@ -279,7 +311,7 @@ type('sound', {
     { key: 'file', label: 'Sound file', type: 'file', kind: 'sound', default: '' },
     { key: 'url', label: 'or a link to one', type: 'text', placeholder: 'https://…', default: '', advanced: true },
     { key: 'volume', label: 'Volume', type: 'range', min: 0, max: 100, default: 80 },
-    { key: 'output', label: 'Play it', type: 'select', options: [['app', 'From this app (pick the device under Bot → Settings)'], ['overlay', 'In the OBS overlay']], default: 'app' },
+    { key: 'output', label: 'Play it', type: 'select', options: [['app', 'From this app (pick the device under Accounts)'], ['overlay', 'In the OBS overlay']], default: 'app' },
     waitField('Wait until it has finished'),
     instanceField,
   ],
@@ -830,7 +862,7 @@ type('writeFile', {
 
 type('obs', {
   name: 'OBS', category: 'Other apps', icon: '🎥',
-  description: 'Needs OBS’s WebSocket server (Tools → WebSocket Server Settings) and Bot → OBS set up.',
+  description: 'Needs OBS’s WebSocket server (Tools → WebSocket Server Settings) and the OBS page (under Stream) set up.',
   fields: [
     {
       key: 'action', label: 'Action', type: 'select', default: 'scene', options: [

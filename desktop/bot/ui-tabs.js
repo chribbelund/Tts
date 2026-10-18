@@ -1,6 +1,6 @@
 'use strict';
 
-// The Bot workspace's tabs, in the order they appear. See ui.js for the
+// The bot's tabs. shell.js puts each on a page of the window; ui.js has the
 // controls they're built from.
 
 (() => {
@@ -8,118 +8,6 @@
   const save = () => Bot.save();
   const external = (url) => window.chatReaderDesktop.openExternal(url);
   const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-  // -------------------------------------------------------------------------
-  // Dashboard
-  // -------------------------------------------------------------------------
-
-  UI.addTab('dashboard', 'Dashboard', (panel) => {
-    const me = Bot.twitch.accounts.streamer;
-    const stream = UI.lastStream;
-    const overlay = Bot.overlayStatus || {};
-    const card = (title, value, detail, state = '') => h('div', { class: 'bot-card', 'data-state': state },
-      h('div', { class: 'bot-card-title' }, title), h('div', { class: 'bot-card-value' }, value), detail ? h('div', { class: 'hint' }, detail) : null);
-
-    panel.append(
-      UI.needsLogin() || '',
-      UI.grid(
-        card('Twitch', me ? me.displayName : 'Not logged in', me ? (Bot.community.live && stream ? `Live · ${stream.viewer_count} watching · ${Bot.duration((Date.now() - Date.parse(stream.started_at)) / 1000)}` : 'Offline') : 'Account tab', me ? (Bot.community.live ? 'on' : '') : 'off'),
-        card('Events', { connected: 'Receiving', connecting: 'Connecting…', error: 'Problem', idle: 'Off' }[Bot.eventsub.state] || '', Bot.eventsub.text || (me ? '' : 'Starts once you log in'), Bot.eventsub.state === 'connected' ? 'on' : Bot.eventsub.state === 'error' ? 'error' : ''),
-        card('Overlay', overlay.running ? plural(overlay.clients || 0, 'overlay') + ' open' : 'Off', overlay.error || (overlay.running ? overlay.url : ''), overlay.running ? 'on' : overlay.error ? 'error' : ''),
-        card('OBS', { connected: 'Connected', connecting: 'Connecting…', error: 'Not connected', idle: 'Off' }[Bot.obs.state], Bot.obs.state === 'error' ? Bot.obs.text : '', Bot.obs.state === 'connected' ? 'on' : Bot.obs.state === 'error' ? 'error' : ''),
-      ),
-    );
-
-    // Title and category.
-    if (me) {
-      const info = { title: '', game: '' };
-      const status = UI.status();
-      const title = UI.text(info, 'title', { maxlength: 140, placeholder: 'Stream title' });
-      const listId = 'botCategoryList';
-      const list = h('datalist', { id: listId });
-      const game = UI.text(info, 'game', { list: listId, placeholder: 'Category' });
-      let searchTimer = null;
-      game.addEventListener('input', () => {
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(async () => {
-          try {
-            const found = await Bot.twitch.searchCategories(game.value);
-            list.replaceChildren(...found.map((c) => h('option', { value: c.name })));
-          } catch {}
-        }, 300);
-      });
-      Bot.twitch.channel().then((ch) => {
-        if (!ch) return;
-        if (document.activeElement !== title) { title.value = ch.title; info.title = ch.title; }
-        if (document.activeElement !== game) { game.value = ch.game_name; info.game = ch.game_name; }
-      }).catch((err) => UI.say(status, err.message, true));
-      const saveInfo = UI.button('Save', (e) => UI.busy(e.currentTarget, async () => {
-        const fields = { title: info.title.trim().slice(0, 140) };
-        if (info.game.trim()) {
-          const cat = await Bot.twitch.findCategory(info.game);
-          if (!cat) throw new Error(`There’s no category called “${info.game}”`);
-          fields.game_id = cat.id;
-        }
-        await Bot.twitch.updateChannel(fields);
-        UI.say(status, 'Saved.');
-      }, status), { cls: 'btn small primary' });
-      panel.append(UI.section('Stream', h('div', { class: 'bot-stream-form' }, UI.field('Title', title), UI.field('Category', h('div', {}, game, list)), saveInfo), status));
-    }
-
-    // Quick actions.
-    const qStatus = UI.status();
-    const act = (label, fn) => UI.button(label, (e) => UI.busy(e.currentTarget, async () => { await fn(); UI.say(qStatus, `${label}: done.`); }, qStatus));
-    const ad = { seconds: '60' };
-    const raffle = Bot.games.raffle;
-    panel.append(UI.section('Quick actions',
-      h('div', { class: 'bot-actions' },
-        h('span', { class: 'bot-inline' }, UI.select(ad, 'seconds', [['30', '30 s'], ['60', '60 s'], ['90', '90 s'], ['120', '2 min'], ['180', '3 min']], { label: 'Ad length' }), act('Run ad', () => Bot.twitch.commercial(Number(ad.seconds)))),
-        act('Marker', () => Bot.twitch.marker('from Chat Reader')),
-        act('Clip', async () => {
-          const res = await Bot.twitch.clip(false);
-          const clip = res.data && res.data[0];
-          if (clip) Bot.addActivity({ kind: 'note', text: `Clip: https://clips.twitch.tv/${clip.id}` });
-        }),
-        act(raffle.open ? `Draw raffle (${raffle.entries.size})` : 'Open raffle', () => Bot.games.raffleAction(raffle.open ? 'draw' : 'start')),
-        act('Test alert', () => Bot.effects.run([{ ...Bot.effects.newEffect('alert'), title: 'Test alert', message: 'The overlay works!' }], UI.testContext())),
-        act('Clear overlay', () => Bot.effects.run([Bot.effects.newEffect('overlayClear')], UI.testContext())),
-      ),
-      Bot.data.lists.length ? h('div', { class: 'bot-actions' }, h('span', { class: 'hint' }, 'Effect lists:'), Bot.data.lists.map((l) => act(`▶ ${l.name}`, () => Bot.lists.run(l.id)))) : null,
-      qStatus));
-
-    // Chat as the bot or the streamer.
-    if (me) {
-      const msg = { text: '', as: Bot.twitch.chatRole() };
-      const cStatus = UI.status();
-      const input = UI.text(msg, 'text', { placeholder: 'Say something in your chat', maxlength: 500 });
-      const send = UI.button('Send', (e) => UI.busy(e.currentTarget, async () => {
-        if (!msg.text.trim()) return;
-        await Bot.twitch.say(msg.text, { as: msg.as });
-        msg.text = '';
-        input.value = '';
-        UI.say(cStatus, '');
-        input.focus();
-      }, cStatus), { cls: 'btn small primary' });
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } });
-      const as = Bot.twitch.accounts.bot ? UI.select(msg, 'as', [['bot', `as ${Bot.twitch.accounts.bot.displayName}`], ['streamer', `as ${me.displayName}`]], { label: 'Send as' }) : null;
-      panel.append(UI.section('Chat', h('div', { class: 'bot-chat-send' }, input, as, send), cStatus));
-    }
-
-    // Activity feed.
-    const items = Bot.activity.slice(0, 80);
-    panel.append(UI.section('Activity',
-      items.length ? h('ul', { class: 'bot-activity' }, items.map((a) => h('li', { 'data-kind': a.kind },
-        h('time', {}, UI.time(a.at)),
-        h('span', { class: 'bot-activity-text' }, a.text, a.simulated ? h('span', { class: 'pill' }, 'test') : null),
-        a.replay ? UI.button('↻', () => a.replay(), { cls: 'x', aria: `Run the effects for “${a.text}” again`, title: 'Run its effects again' }) : null,
-      ))) : h('p', { class: 'hint bot-empty' }, 'Follows, subs, raids, redemptions and the rest show up here as they happen.')));
-
-    const lines = Bot.logLines.slice(-60).reverse();
-    const errors = lines.filter((l) => l.level === 'error').length;
-    panel.append(h('details', { class: 'bot-log', open: errors > 0 && UI.logOpen ? true : null, ontoggle: (e) => { UI.logOpen = e.currentTarget.open; } },
-      h('summary', {}, `Log${errors ? ` · ${plural(errors, 'problem')}` : ''}`),
-      lines.length ? h('ul', {}, lines.map((l) => h('li', { 'data-level': l.level }, h('time', {}, UI.time(l.at)), ' ', l.text))) : h('p', { class: 'hint' }, 'Nothing logged.')));
-  }, { listens: ['activity', 'stream', 'live', 'eventsub', 'accounts', 'log', 'obs', 'overlay', 'raffle'] });
 
   // -------------------------------------------------------------------------
   // Commands
@@ -614,8 +502,8 @@
 
   UI.addTab('hotkeys', 'Hotkeys & API', (panel) => {
     const problems = Bot.host.hotkeyProblems();
-    panel.append(
-      UI.lead('Keys that run effects, working while a game is focused (like the reader’s own shortcuts under Settings → Keys). An ordinary key needs a modifier such as Alt; F-keys can be used alone.'),
+    panel.append(UI.section('Bot hotkeys',
+      UI.lead('Keys that run effects, working while a game is focused, like the reader’s shortcuts above. An ordinary key needs a modifier such as Alt; F-keys can be used alone.'),
       UI.row(UI.button('+ New hotkey', () => editHotkey(Bot.hotkeys.newHotkey(), true), { cls: 'btn small primary' })),
       UI.table(
         [{ label: 'On', cls: 'c-on' }, { label: 'Name' }, { label: 'Keys' }, { label: 'Effects', cls: 'num' }, { label: '', cls: 'c-act' }],
@@ -633,8 +521,7 @@
           ],
         })),
         { empty: 'No hotkeys yet.' },
-      ),
-    );
+      )));
 
     const base = (Bot.overlayStatus && Bot.overlayStatus.url) || `http://127.0.0.1:${Bot.data.overlay.port}/`;
     const keyBox = h('code', { class: 'code-box' }, Bot.data.overlay.apiKey);
@@ -715,16 +602,19 @@
         .sort((a, b) => (q.sort === 'name' ? a.login.localeCompare(b.login) : (b[q.sort] || 0) - (a[q.sort] || 0)))
         .slice(0, 150);
       tableBox.replaceChildren(UI.table(
-        [{ label: 'Viewer' }, { label: 'Messages', cls: 'num' }, { label: 'Watched' }, { label: Bot.data.currency.name, cls: 'num' }, { label: 'First seen' }, { label: 'Last seen' }, { label: '' }],
+        [{ label: 'Viewer' }, { label: 'Read as' }, { label: 'Messages', cls: 'num' }, { label: 'Watched' }, { label: Bot.data.currency.name, cls: 'num' }, { label: 'First seen' }, { label: 'Last seen' }, { label: '', cls: 'c-act' }],
         list.map((v) => ({
           cells: [
             h('span', {}, v.displayName || v.login, v.platform !== 'twitch' ? h('span', { class: 'platform', 'data-platform': v.platform }, { youtube: 'YouTube', tiktok: 'TikTok' }[v.platform]) : null),
+            h('span', { class: 'hint' }, [Bot.host.nickname(v.login) ? `“${Bot.host.nickname(v.login)}”` : '', Bot.host.chatterVoice(v.login), Bot.host.isIgnored(v.login) ? 'ignored' : ''].filter(Boolean).join(' · ')),
             String(v.messages || 0),
             Bot.duration((v.minutes || 0) * 60),
             UI.number(v, 'currency', { min: 0, onChange: () => { Bot.saveViewers(); } }),
             UI.date(v.firstSeen),
             UI.date(v.lastSeen),
-            UI.button('🗑', () => { if (confirm(`Forget ${v.displayName}? Their points and watch time are deleted.`)) { Bot.viewersDb.remove(v.key); UI.rerender(); } }, { cls: 'x', aria: `Forget ${v.displayName}`, title: 'Forget' }),
+            h('span', { class: 'bot-row-actions' },
+              UI.button('Card', (e) => Bot.host.openChatterFor({ login: v.login, displayName: v.displayName || v.login, platform: v.platform, userId: v.id }, e.currentTarget), { title: 'Nickname, voice, points and moderation' }),
+              UI.button('🗑', () => { if (confirm(`Forget ${v.displayName}? Their points and watch time are deleted.`)) { Bot.viewersDb.remove(v.key); UI.rerender(); } }, { cls: 'x', aria: `Forget ${v.displayName}`, title: 'Forget' })),
           ],
         })),
         { empty: all.length ? 'Nobody matches.' : 'Viewers are added as they chat and while they watch.' },
@@ -1075,7 +965,7 @@
     });
   }
 
-  UI.addTab('account', 'Account & settings', (panel) => {
+  UI.addTab('account', 'Accounts', (panel) => {
     const d = Bot.data;
     const clientInput = UI.text(d, 'clientId', { placeholder: 'e.g. abcd1234efgh5678…', onChange: () => { d.clientId = d.clientId.trim(); save(); } });
     clientInput.addEventListener('change', UI.rerender);
@@ -1110,51 +1000,16 @@
       UI.field('Play the bot’s sounds on', device, 'Pick a virtual cable here to keep alert sounds off your headphones but on stream. The reader’s own voice isn’t affected.'),
       UI.field('Volume of every bot sound', UI.range(sound, 'volume', { onChange: save }))));
 
-    // Backup, and importing from other bots.
-    const bStatus = UI.status();
-    const opts = { withViewers: true };
-    panel.append(UI.section('Backup',
-      UI.lead('Saves everything in one file — the reader’s settings (voices, filters, nicknames, keys…) and the whole bot: commands, events, timers, effect lists, counters, quotes, multistream and the rest. Your logins are never in it. Settings → Backup saves the same file.'),
-      UI.check(opts, 'withViewers', 'Include the viewer list, with points and watch time'),
-      UI.row(
-        UI.button('Save everything…', async () => {
-          const r = await Bot.desktop.pickFile({ kind: 'json', save: true, defaultName: `chat-reader-settings-${new Date().toISOString().slice(0, 10)}.json` });
-          if (!r.path) return;
-          const text = JSON.stringify({
-            kind: 'chat-reader-settings', version: 1, savedAt: new Date().toISOString(),
-            settings: Bot.host.settings,
-            bot: { setup: Bot.data, ...(opts.withViewers ? { viewers: Bot.viewers } : {}) },
-          }, null, 2);
-          const res = await Bot.desktop.writeFile({ file: r.path, text });
-          UI.say(bStatus, res.error ? `Couldn’t save: ${res.error}` : `Saved to ${r.path}`, !!res.error);
-        }),
-        UI.button('Load from a file…', async () => {
-          const r = await Bot.desktop.pickFile({ kind: 'json' });
-          if (!r.path) return;
-          const res = await Bot.desktop.readFile(r.path);
-          if (res.error) { UI.say(bStatus, res.error, true); return; }
-          let data;
-          try { data = JSON.parse(res.text); } catch { UI.say(bStatus, 'That file isn’t valid JSON.', true); return; }
-          // A full file, a bot-only file from an earlier version, or reader settings alone.
-          const bot = data.bot || (data.kind === 'chat-reader-bot' ? data : null);
-          const reader = data.settings && typeof data.settings === 'object' ? data.settings : null;
-          if (!bot && !reader) { UI.say(bStatus, 'Nothing in that file looked like Chat Reader settings.', true); return; }
-          if (!confirm(`Replace ${[reader ? 'the reader’s settings' : '', bot ? 'your whole bot setup' : ''].filter(Boolean).join(' and ')} with what’s in this file?`)) return;
-          try {
-            const kept = reader ? Bot.host.importReaderSettings(reader) : 0;
-            if (bot) Bot.replaceData(bot, { withViewers: opts.withViewers });
-            UI.say(bStatus, `Loaded ${[kept ? `${kept} reader settings` : '', bot ? 'the bot setup' : ''].filter(Boolean).join(' and ')}.`);
-            UI.rerender();
-          } catch (err) { UI.say(bStatus, `That file couldn’t be used: ${err.message}`, true); }
-        }),
-        UI.button('Start the bot over…', () => {
-          if (!confirm('Delete every command, event, timer, effect list, counter and quote? Your login, the reader’s settings and the viewer list stay.')) return;
-          Bot.replaceData({ clientId: Bot.data.clientId });
-          UI.rerender();
-        }, { cls: 'btn small danger' }),
-      ),
-      bStatus));
+  }, { listens: ['accounts'] });
 
+  // -------------------------------------------------------------------------
+  // Backup & import: under the reader's own Backup section, on the same page
+  // -------------------------------------------------------------------------
+
+  UI.addTab('import', 'Import', (panel) => {
+    panel.append(UI.section('What the backup holds',
+      UI.lead('In the desktop app the file holds the reader’s settings and the whole bot: commands, events, timers, effect lists, counters, quotes, multistream and the rest. Your logins are never in it.'),
+      UI.check(Bot.data.ui, 'backupViewers', 'Include the viewer list, with points and watch time', { onChange: save })));
     const iStatus = UI.status();
     if (UI.importNote) UI.say(iStatus, UI.importNote);
     const runImport = (kind) => async (e) => {
@@ -1175,5 +1030,13 @@
       ),
       h('p', { class: 'hint' }, 'Firebot: pick Firebot/v5/profiles in your app data folder (Windows: %APPDATA%\\Firebot, macOS: ~/Library/Application Support/Firebot), or a .firebotsetup you exported. Mix It Up: make a backup under Settings → Advanced → Backup Settings and pick the .miubackup, or pick exported .miucommand files. Pictures and sounds stay where they are on disk, so effects that use them work as long as the files are still there.'),
       iStatus));
-  }, { listens: ['accounts'] });
+
+    panel.append(UI.section('Start over',
+      UI.lead('Deletes every command, event, timer, effect list, counter and quote. Your logins, the reader’s settings and the viewer list stay.'),
+      UI.row(UI.button('Start the bot over…', () => {
+        if (!confirm('Delete every command, event, timer, effect list, counter and quote? Your login, the reader’s settings and the viewer list stay.')) return;
+        Bot.replaceData({ clientId: Bot.data.clientId });
+        UI.rerender();
+      }, { cls: 'btn small danger' }))));
+  });
 })();

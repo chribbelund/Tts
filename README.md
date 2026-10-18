@@ -105,38 +105,53 @@ can be started by hand from the Actions tab.
 
 ## Bot (desktop app)
 
-Desktop app only. Press **Bot** in the top bar. It does what [Firebot](https://firebot.app)
-does, next to the reader: chat commands, alerts for follows, subs, cheers, raids and
-redemptions, timers, loyalty points, games, moderation, an OBS overlay, hotkeys and a
-Stream Deck API. Everything runs on your computer; nothing goes through a server of ours.
+Desktop app only. It does what [Firebot](https://firebot.app) does, in the same window as
+the reader: chat commands, alerts for follows, subs, cheers, raids and redemptions, timers,
+loyalty points, games, moderation, an OBS overlay, hotkeys and a Stream Deck API.
+Everything runs on your computer; nothing goes through a server of ours.
+
+In the desktop app the window has its sections down the side, grouped by what they're for
+rather than by which half of the app they belong to:
+
+| Group | Sections |
+|---|---|
+| | **Dashboard**: the player and chat, with the stream next to them |
+| Reader | Voices, Reading, Nicknames, Filters, Viewer controls (the website's Settings, as pages) |
+| Bot | Commands, Events, Rewards, Timers, Effect lists, Counters |
+| Community | Viewers, Points & games, Quotes, Moderation |
+| Stream | Multistream, Overlay, OBS |
+| App | Accounts, Shortcuts & API (the reader's keys and the bot's hotkeys), Display, Backup & import |
+
+A dot next to a section shows when something there needs you: logged out, OBS not
+connected, the overlay's port taken. The website is unchanged: just the reader, with its
+Settings dialog.
 
 ### Setting it up
 
 1. **Make a Twitch application** (once, free): on
    [dev.twitch.tv/console/apps/create](https://dev.twitch.tv/console/apps/create) give it any
    name, `http://localhost` as the OAuth Redirect URL, category *Chat Bot* and Client Type
-   **Public**. Copy its Client ID into *Bot → Account & settings*.
+   **Public**. Copy its Client ID into *Accounts*.
 2. **Log in**: press *Log in to Twitch*, open twitch.tv/activate and type the code shown.
    No password goes through the app, and the login is kept encrypted by the system keychain
    and renewed on its own.
 3. **Optionally log in a bot account** (a second Twitch account such as *YourNameBot*), so
    replies come from it instead of from you. Open the activation link in a private window
    logged in as that account.
-4. **Add the overlay to OBS**: a Browser source with the URL under *Bot → Overlay*
+4. **Add the overlay to OBS**: a Browser source with the URL under *Overlay*
    (`http://127.0.0.1:7473/` by default), 1920 × 1080.
 
 ### What's in it
 
-| Tab | What it does |
+| Section | What it does |
 |---|---|
-| Dashboard | Live status, viewers and uptime; edit the title and category; run an ad, add a marker, clip, open a raffle; chat as the bot or yourself; an activity feed where ↻ re-runs an event's effects; the error log |
+| Dashboard | The reader's player and chat, and beside them: a card per thing that can be on, off or broken (the reader, your chats, Twitch, events, multistream, overlay, OBS), each opening its section; one box to write in chat (as the bot or you, on Twitch or in every multistream chat) or to have the reader say it; run an ad, add a marker, clip, open a raffle, test the overlay, run an effect list; an activity feed where ↻ re-runs an event's effects; the error log; the title and category |
 | Commands | Your own commands, with aliases, start-of-message / anywhere / regex triggers, who may use them (roles, custom roles, named users), cooldowns, a points cost and usage counts. Built-in commands that can be renamed, re-permissioned or switched off: `!commands`, `!uptime`, `!followage`, `!watchtime`, `!title`, `!game`, `!so`, `!marker`, `!points` (give / add / remove / set), `!top`, `!quote`, `!permit`, `!raffle` |
 | Multistream | Joins your Twitch, YouTube and TikTok chats: see [Multistream](#multistream) |
 | Events | Effects for follows, subs, resubs, gifted subs, cheers, raids, channel point redemptions, hype trains, polls, predictions, ad breaks, shoutouts, bans, going live and offline, title changes, charity donations, chat messages, a viewer's first message ever or this stream, YouTube Super Chats and memberships, TikTok gifts, and OBS scene and stream changes. Each can be filtered (*bits is at least 100*) and simulated |
 | Rewards | Your channel point rewards: create, change, pause and delete them, give each its own effects, and have redemptions completed or refunded automatically |
 | Timers | Effects every N minutes, only after enough chat, optionally only while live |
 | Effect lists | Reusable effects with arguments, run from anywhere |
-| Hotkeys & API | Global hotkeys that run effects, and an HTTP API for Stream Deck and the like |
 | Counters | Counters with min / max, shown on stream as an overlay or written to a text file; custom variables |
 | Viewers | Everyone who chatted or watched, with messages, watch time and points; search, edit, export to CSV; custom roles |
 | Points & games | Points for watching, with a sub bonus; slots, gamble, heist and raffles |
@@ -144,10 +159,13 @@ Stream Deck API. Everything runs on your computer; nothing goes through a server
 | Moderation | Banned words and regex, links (with `!permit`), caps, symbols, emotes, length and repeats; delete, warn and time out, stricter with repeat offenders |
 | Overlay | The OBS browser source, its instances and counter widgets |
 | OBS | Connects to OBS's WebSocket server (Tools → WebSocket Server Settings) |
-| Account & settings | Logins, who replies, the sound output device, backup, and importing from Firebot and Mix It Up |
+| Accounts | Logins, who replies, the sound output device |
+| Shortcuts & API | The reader's shortcuts, global hotkeys that run effects, and an HTTP API for Stream Deck and the like |
+| Backup & import | One file with the reader and the whole bot, and importing from Firebot and Mix It Up |
 
 **Effects.** Chat message, announcement, speak with TTS (any voice, read before waiting
-chat), control the reader, play a sound (on any output device, or in the overlay), overlay
+chat), control the reader, change how a chatter is read (their voice, nickname, or
+ignoring them), play a sound (on any output device, or in the overlay), overlay
 alert / picture or video / text / clear, wait, if-then-else, random effect, run an effect
 list, stop, counter, variable, points, time out / ban / unban / delete / VIP / clear chat,
 shoutout, title and category, ad break, marker, clip, poll, prediction, raid, channel point
@@ -159,12 +177,28 @@ own with ▶.
 **Variables.** Text in effects can use `$variables`, in Firebot's style: `$user`,
 `$target`, `$arg[1]`, `$count`, `$bits`, `$message`, `$counter[deaths]`, `$var[name]`,
 `$currency`, `$followAge`, `$uptime`, `$game`, `$randomNumber[1,6]`, `$pick[a,b]`,
-`$math[$bits / 100]`, `$if[$bits >= 100,big,small]`, `$effectOutput[http]` and more. The
+`$math[$bits / 100]`, `$if[$bits >= 100,big,small]`, `$effectOutput[http]`, the reader's
+`$ttsVoice`, `$nickname`, `$ttsVoices`, `$ttsWaiting` and `$ttsPaused`, and more. The
 **$** button next to a text field lists them all, with what each event brings along.
 
-**The reader and the bot together.** The reader doesn't read the bot's own replies, nor
-commands meant for the bot in your channel (both can be switched under *Account &
-settings*). Commands also work from YouTube and TikTok chat; the replies go to Twitch chat.
+**The reader and the bot together.**
+
+- **A click on a name in chat** opens the chatter's card: their nickname and voice as
+  before, and now also their points (give or take some), watch time, messages, bits and
+  role, with Shoutout, Time out, Ban and Unban for Twitch chatters. *Viewers* has a
+  *Card* button per viewer and shows the nickname and voice the reader uses for each.
+- **`!voice` and `!tts` get an answer in chat** (*@alice your TTS voice is now Bella*, or
+  the voices to choose from), which the website can't do. It's switched under *Viewer
+  controls*.
+- **Rewards by name**: *Viewer controls* lists your channel point rewards so you pick what
+  each does for the reader, instead of redeeming each one to link it. For a reward without
+  text, give it effects under *Rewards*: *Change how a chatter is read* and *Speak with TTS*
+  work for any reward.
+- **Stream events in the chat list**: follows, redemptions, polls, predictions, hype trains,
+  ad breaks and the bot's own notes show up between the messages, without being read out.
+- The reader doesn't read the bot's own replies, nor commands meant for the bot in your
+  channel (both can be switched under *Accounts*). Commands also work from YouTube and
+  TikTok chat; the replies go to Twitch chat.
 
 **Stream Deck.** Use the *Website* action with *Access in background* and the link from
 *Effect lists → Copy API link*: `http://127.0.0.1:7473/api/run/<list>?key=…`. Add
@@ -173,13 +207,13 @@ settings*). Commands also work from YouTube and TikTok chat; the replies go to T
 **Where it's kept.** The setup and the viewer list are JSON files in the app's data folder
 (`bot/` under `~/Library/Application Support/Chat Reader` on macOS,
 `%APPDATA%\Chat Reader` on Windows). One backup file holds everything — the reader's
-settings and the whole bot — whether saved from *Settings → Backup* or *Bot → Account &
-settings*. The logins (Twitch, Google, TikTok, OBS) are kept apart, encrypted by the system
+settings and the whole bot, saved under *Backup & import* (the viewer list can be left
+out). The logins (Twitch, Google, TikTok, OBS) are kept apart, encrypted by the system
 keychain, and never go into a backup.
 
 ### Multistream
 
-For streaming on Twitch, YouTube and TikTok at the same time. *Bot → Multistream* joins
+For streaming on Twitch, YouTube and TikTok at the same time. *Multistream* joins
 the three chats: every message written on one is posted on the other two, after a prefix
 you choose, so viewers everywhere see the whole conversation.
 
@@ -213,7 +247,7 @@ format.
 
 ### Importing from Firebot and Mix It Up
 
-*Account & settings → Import from another bot* brings over commands (with subcommands),
+*Backup & import → Import from another bot* brings over commands (with subcommands),
 events and their filters, channel point reward effects, timers, effect lists, hotkeys,
 counters, custom roles, quotes, the points settings and every viewer with their watch time
 and points. You see what was found and choose what to take before anything is added;
@@ -487,7 +521,7 @@ For system voices, Microsoft Edge offers the most natural free options, the "…
 - `desktop/bot-main.js`: the bot's main-process side — its files, the encrypted logins, the overlay and API server, HTTP requests
 - `desktop/multistream-main.js`: signing in to YouTube with Google, and posting to TikTok, for the multistream relay
 - `desktop/import-main.js`: reading Firebot and Mix It Up data (JSON, NeDB, SQLite, zip backups) for the importer
-- `desktop/bot/`: the bot itself, loaded into the page by the desktop app only — Twitch login and API (`twitch.js`), EventSub (`eventsub.js`), `$variables` (`variables.js`), effects (`effects.js`), commands, events and timers (`triggers.js`), viewers, points, games and moderation (`community.js`), OBS (`obs.js`), the multistream relay (`relay.js`), importing from other bots (`importers.js`) and the workspace (`ui.js`, `ui-tabs.js`, `ui-multistream.js`)
+- `desktop/bot/`: the bot itself, loaded into the page by the desktop app only — Twitch login and API (`twitch.js`), EventSub (`eventsub.js`), `$variables` (`variables.js`), effects (`effects.js`), commands, events and timers (`triggers.js`), viewers, points, games and moderation (`community.js`), OBS (`obs.js`), the multistream relay (`relay.js`), importing from other bots (`importers.js`), the controls and tabs (`ui.js`, `ui-tabs.js`, `ui-multistream.js`), the Dashboard's side column (`dashboard.js`), where the reader and the bot meet (`integrations.js`) and the window's sections (`shell.js`)
 - `desktop/overlay/`: the OBS overlay page
 - `docs/bot-plan.md`: how the bot is put together, and why
 - `.github/workflows/desktop.yml`: builds the desktop binaries and publishes them on a `v*` tag

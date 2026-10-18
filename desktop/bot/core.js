@@ -23,6 +23,7 @@ const BOT_DEFAULTS = {
   readBotMessages: false,    // let the reader say the bot's own chat replies
   skipBotCommands: true,     // the reader doesn't read the bot's commands in your channel
   remoteCommands: true,      // YouTube and TikTok chat can use commands too
+  answerReaderCommands: true, // the bot answers the reader's !voice and !tts in Twitch chat
   commandPrefixHint: '!',
   commands: [],
   systemCommands: {},        // id -> { enabled, trigger, permission, cooldownGlobal, cooldownUser }
@@ -98,7 +99,11 @@ const BOT_DEFAULTS = {
     overlayChat: true,
     quota: { day: '', units: 0 },
   },
-  ui: { tab: 'dashboard' },
+  ui: {
+    tab: 'dashboard',
+    feedActivity: true,      // follows, redemptions and the rest as lines in the chat list
+    backupViewers: true,     // backups include the viewer list
+  },
 };
 
 const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);

@@ -69,7 +69,7 @@ EventsApi.fire = async (type, { user = null, fields = {}, raw = null, message = 
 
   if (!spec.quiet) {
     Bot.addActivity({
-      kind: 'event', type, simulated,
+      kind: 'event', type, simulated, fields, platform: user ? user.platform || 'twitch' : 'twitch',
       text: spec.text(user ? user.displayName || user.login : '', fields),
       replay: () => EventsApi.fire(type, { user, fields, raw, message, simulated: true }),
     });

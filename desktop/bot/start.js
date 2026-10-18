@@ -45,8 +45,8 @@ function hookIntoReader() {
 
   host.onAction = (action) => Bot.hotkeys.run(action);
 
-  // Settings → Backup saves the bot along with the reader, and loads it back.
-  host.backupExtra = () => ({ setup: Bot.data, viewers: Bot.viewers });
+  // Backup & import saves the bot along with the reader, and loads it back.
+  host.backupExtra = () => ({ setup: Bot.data, ...(Bot.data.ui.backupViewers !== false ? { viewers: Bot.viewers } : {}) });
   host.restoreExtra = (part) => {
     if (!confirm('This file also has a bot setup (commands, events, timers…). Replace your bot setup with it? Your Twitch login stays.')) return false;
     try {
@@ -57,8 +57,6 @@ function hookIntoReader() {
       return false;
     }
   };
-  const backupHint = document.querySelector('#panel-backup .hint');
-  if (backupHint) backupHint.append(' In the desktop app the file also holds the bot: commands, events, timers, the viewer list and the rest. Logins are never in it.');
   host.hotkeys = () => (Bot.data ? Bot.hotkeys.bindings() : []);
 }
 

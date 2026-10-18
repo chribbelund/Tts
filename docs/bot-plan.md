@@ -43,9 +43,13 @@ desktop/
     obs.js           obs-websocket v5 client
     relay.js         multistream: joins the Twitch, YouTube and TikTok chats
     importers.js     Firebot and Mix It Up data -> the bot's own
-    ui.js            the workspace's building blocks (forms, effect editor, item editor)
-    ui-tabs.js       the workspace's tabs
+    ui.js            the building blocks (forms, effect editor, item editor), tab drawing
+    ui-tabs.js       the bot's tabs
     ui-multistream.js  the Multistream tab
+    dashboard.js     the Dashboard's side column: status cards, chat and TTS, actions, activity
+    integrations.js  the reader and the bot together: chatter card, answers to !voice
+                     and !tts, events in the chat list, rewards by name
+    shell.js         the window: sections down the side, the reader's settings as pages
     start.js         start-up: hooks into the reader, logs back in, starts everything
   overlay/           served to OBS as a browser source
     index.html, overlay.js, overlay.css
@@ -53,7 +57,17 @@ desktop/
 
 The page's TTS engine stays where it is. The bot uses a small host API that
 `js/app.js` exposes (`window.chatReaderHost`): speak a line, pause, skip, clear,
-volume, and hooks for remote (YouTube/TikTok) chat and the reader's filters.
+volume, chatters' voices and nicknames, the reader's rewards, notes in the chat
+list, and hooks for remote (YouTube/TikTok) chat, the reader's filters, its
+commands, its state and its dialogs. On the website every hook is left unset.
+
+**One window.** The bot isn't a dialog on top of the reader. `shell.js` puts
+the sections down the side, grouped Reader / Bot / Community / Stream / App,
+and moves the website's Settings sections out of their dialog into pages, so
+the reader's and the bot's settings sit side by side (Shortcuts holds the
+reader's keys and the bot's hotkeys; Backup & import holds both). The
+Dashboard is the reader's own player and chat, with the stream's status,
+chat and TTS box, quick actions and activity next to them.
 
 ## Features (Firebot → here)
 
@@ -61,10 +75,12 @@ volume, and hooks for remote (YouTube/TikTok) chat and the reader's filters.
 chat replies are sent as. Device-code login for each, automatic refresh,
 logout.
 
-**Dashboard.** Live status, title and category (editable), viewer count,
-uptime, quick actions (ad break, marker, clip, shoutout), a chat box to post as
-the bot or the streamer, and an activity feed of every event with a ↻ button to
-replay its alert. An error log.
+**Dashboard.** The reader's player and chat, next to status cards (reader,
+chats, Twitch, events, multistream, overlay, OBS), one box to post in chat (as
+the bot or the streamer, on Twitch or every multistream chat) or have the reader
+say it, quick actions (ad break, marker, clip, raffle, overlay test, effect
+lists), an activity feed of every event with a ↻ button to replay its alert, an
+error log, and the title and category (editable).
 
 **Commands.** Custom commands with aliases; trigger at the start of a message,
 anywhere in it, or by regex; permission by role (everyone, subs, VIPs, mods,

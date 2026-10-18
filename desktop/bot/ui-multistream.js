@@ -80,7 +80,7 @@
 
       UI.section('Your channels',
         UI.row(
-          h('div', { class: 'field' }, h('span', { class: 'row-label' }, 'Twitch'), h('span', {}, Bot.twitch.loggedIn() ? `#${Bot.twitch.streamerLogin()} (your login)` : 'Log in under Account & settings')),
+          h('div', { class: 'field' }, h('span', { class: 'row-label' }, 'Twitch'), h('span', {}, Bot.twitch.loggedIn() ? `#${Bot.twitch.streamerLogin()} (your login)` : 'Log in under Accounts')),
           UI.field('YouTube channel or stream', UI.text(c, 'youtube', { placeholder: '@handle or a link to the stream', onChange: save })),
           UI.field('TikTok username', UI.text(c, 'tiktok', { placeholder: '@username', onChange: save })),
         ),
@@ -103,7 +103,7 @@
         UI.check(c, 'sendTwitch', 'Post YouTube and TikTok chat in my Twitch chat', { onChange: save }),
         Bot.twitch.accounts.bot
           ? UI.field('Post as', UI.select(c, 'twitchAs', [['auto', 'Same as the bot’s replies'], ['bot', Bot.twitch.accounts.bot.displayName], ['streamer', 'Me']], { onChange: save }))
-          : h('p', { class: 'hint' }, 'Posted as you. Log in a bot account under Account & settings to post as the bot instead. Make the bot a mod (/mod name) so Twitch lets it post quickly.')),
+          : h('p', { class: 'hint' }, 'Posted as you. Log in a bot account under Accounts to post as the bot instead. Make the bot a mod (/mod name) so Twitch lets it post quickly.')),
 
       UI.section('Posting on YouTube',
         UI.check(c, 'sendYoutube', 'Post Twitch and TikTok chat in my YouTube chat', { onChange: () => { save(); UI.rerender(); } }),

@@ -46,7 +46,7 @@ Obs.connect = async () => {
       const identify = { rpcVersion: 1, eventSubscriptions: 1 | 4 | 64 };
       const auth = data.d.authentication;
       if (auth) {
-        if (!password) { setState('error', 'OBS asks for a password. Enter it under Bot → OBS.'); ws.close(); return; }
+        if (!password) { setState('error', 'OBS asks for a password. Enter it under OBS, in the Stream section.'); ws.close(); return; }
         identify.authentication = await sha256b64((await sha256b64(password + auth.salt)) + auth.challenge);
       }
       ws.send(JSON.stringify({ op: 1, d: identify }));
@@ -84,7 +84,7 @@ Obs.disconnect = (keepWanted = false) => {
 };
 
 Obs.request = (requestType, requestData = {}) => new Promise((resolve, reject) => {
-  if (!Obs.ws || Obs.state !== 'connected') { reject(new Error('OBS isn’t connected (Bot → OBS)')); return; }
+  if (!Obs.ws || Obs.state !== 'connected') { reject(new Error('OBS isn’t connected (see OBS, in the Stream section)')); return; }
   const requestId = `r${++Obs.seq}`;
   Obs.pending.set(requestId, { resolve, reject });
   Obs.ws.send(JSON.stringify({ op: 6, d: { requestType, requestId, requestData } }));

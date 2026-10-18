@@ -227,7 +227,7 @@ function handleRequest(req, res) {
     const key = url.searchParams.get('key') || req.headers['x-api-key'] || '';
     const okKey = overlay.apiKey && key.length === overlay.apiKey.length
       && crypto.timingSafeEqual(Buffer.from(String(key)), Buffer.from(overlay.apiKey));
-    if (!okKey) return json(res, 401, { error: 'Missing or wrong key. Find it in the app under Bot → Hotkeys & API.' });
+    if (!okKey) return json(res, 401, { error: 'Missing or wrong key. Find it in the app under Shortcuts & API.' });
     if (parts[1] === 'lists' && req.method === 'GET') return json(res, 200, { lists: overlay.catalog });
     if (parts[1] === 'run' && parts[2] && (req.method === 'POST' || req.method === 'GET')) {
       const id = decodeURIComponent(parts[2]);

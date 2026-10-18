@@ -184,6 +184,24 @@ Relay.onEvent = (type, user, fields, text, simulated) => {
   for (const p of RELAY_PLATFORMS) if (p !== from && canSend(p)) Relay.queue(p, line);
 };
 
+// The streamer's own message from the Dashboard, in every chat of the
+// multistream that can be posted to. Returns where it went.
+Relay.broadcast = async (text, { as = Bot.twitch.chatRole() } = {}) => {
+  const where = [];
+  if (Bot.twitch.loggedIn()) {
+    await Bot.twitch.say(text, { as });
+    where.push('twitch');
+  }
+  if (cfg().enabled) {
+    for (const p of ['youtube', 'tiktok']) {
+      if (!canSend(p)) continue;
+      Relay.queue(p, text);
+      where.push(p);
+    }
+  }
+  return where;
+};
+
 Relay.queue = (platform, text) => {
   const box = Relay.boxes[platform];
   box.push(text);
@@ -272,7 +290,7 @@ async function ytTokens() {
 
 async function ytAccessToken() {
   const t = await ytTokens();
-  if (!t) throw new Error('Sign in to YouTube first (Bot → Multistream)');
+  if (!t) throw new Error('Sign in to YouTube first (under Multistream)');
   if (t.expiresAt - Date.now() > 60000) return t.accessToken;
   if (!t.refreshToken) throw new Error('The YouTube sign-in ran out; sign in again');
   const secret = await Bot.desktop.getSecret('youtube-client-secret');
