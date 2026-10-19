@@ -123,6 +123,7 @@ function startTwitch() {
   await Bot.twitch.init().catch((err) => Bot.log('error', `Twitch: ${err.message}`));
   if (Bot.twitch.loggedIn()) startTwitch();
   if (Bot.data.obs.enabled && Bot.data.obs.autoConnect) Bot.obs.connect();
+  Bot.spotify.connect().catch((err) => Bot.log('error', `Spotify: ${err.message}`));
   Bot.relay.start();
   Bot.host.syncHotkeys();
 

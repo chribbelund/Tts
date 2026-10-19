@@ -132,3 +132,55 @@ body { font: 600 calc(36px * var(--scale, 1))/1.2 var(--font, system-ui, -apple-
 @keyframes out-slide-down { to { opacity: 0; transform: translateY(120px); } }
 @keyframes out-zoom { to { opacity: 0; transform: scale(.4); } }
 @keyframes bump { 50% { transform: scale(1.15); } }
+
+/* The song playing (?spotify): a card in the top-left corner of the source,
+   with the next requests under it. Sized by --np-size (the title's size). */
+#spotify {
+  --np-size: calc(30px * var(--scale, 1));
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  width: calc(var(--np-size) * 17);
+  max-width: calc(100vw - 32px);
+  font-size: var(--np-size);
+  transition: opacity .5s ease, transform .5s ease;
+}
+#spotify.idle { opacity: 0; transform: translateY(12px); }
+.np {
+  display: flex;
+  align-items: center;
+  gap: .55em;
+  padding: .45em;
+  background: var(--box-bg, rgba(10, 8, 20, .78));
+  border-radius: var(--radius, 12px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
+}
+.np.changed { animation: np-in .6s ease-out; }
+.np-art { width: 3.1em; height: 3.1em; flex: none; border-radius: calc(var(--radius, 12px) * .6); object-fit: cover; }
+.np-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: .12em; }
+.np-label { font-size: .46em; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent, #a37bff); }
+.np-title { overflow: hidden; white-space: nowrap; font-weight: 700; line-height: 1.2; }
+.np-title span { display: inline-block; }
+.np-title:not(.scroll) span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.np-title.scroll span { animation: np-scroll var(--secs, 10s) ease-in-out 2s infinite alternate; }
+.np-artist { font-size: .66em; font-weight: 500; opacity: .8; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.np-bar { height: .16em; margin-top: .25em; border-radius: 1em; background: rgba(255, 255, 255, .18); overflow: hidden; }
+.np-bar span { display: block; height: 100%; width: 0; background: var(--accent, #a37bff); border-radius: inherit; }
+.np-next {
+  list-style: none;
+  margin: .35em 0 0;
+  padding: .35em .6em;
+  background: var(--box-bg, rgba(10, 8, 20, .78));
+  border-radius: var(--radius, 12px);
+  font-size: .52em;
+  font-weight: 500;
+  counter-reset: next;
+}
+.np-next li { display: flex; gap: .3em; align-items: baseline; padding: .15em 0; white-space: nowrap; overflow: hidden; counter-increment: next; }
+.np-next li::before { content: counter(next) "."; opacity: .6; min-width: 1.2em; }
+.np-next-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+.np-next-artist { opacity: .75; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+.np-next-by { margin-left: auto; padding-left: .6em; color: var(--accent, #a37bff); flex: none; }
+#spotify, #spotify * { text-shadow: none; }
+@keyframes np-in { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: none; } }
+@keyframes np-scroll { from { transform: translateX(0); } to { transform: translateX(var(--over, 0)); } }

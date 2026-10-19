@@ -74,7 +74,7 @@
       item: o,
       build: (x) => [
         UI.lead('What it says in chat. Leave a reply empty to say nothing.'),
-        ...Object.keys(spec.texts).map((k) => UI.field(k, UI.text(x.texts, k, { multiline: true, rows: 2, vars: true, extraVars: [['who', 'Who it’s about'], ['amount', 'Amount'], ['list', 'The list'], ['number', 'Number'], ['quoteText', 'The quote'], ['age', 'How long'], ['time', 'Watch time'], ['rank', 'Rank'], ['seconds', 'Seconds']] }))),
+        ...Object.keys(spec.texts).map((k) => UI.field(k, UI.text(x.texts, k, { multiline: true, rows: 2, vars: true, extraVars: [['who', 'Who it’s about'], ['amount', 'Amount'], ['list', 'The list'], ['number', 'Number'], ['quoteText', 'The quote'], ['age', 'How long'], ['time', 'Watch time'], ['rank', 'Rank'], ['seconds', 'Seconds'], ['song', 'Song'], ['artist', 'Artist'], ['position', 'Place in the queue'], ['reason', 'Why it was refused'], ['link', 'Link to the song']] }))),
         spec.key === 'so' ? UI.check(x, 'official', 'Also send Twitch’s own /shoutout') : null,
         spec.key === 'points' ? UI.check(x, 'allowGive', 'Let chatters give their points to others (“give @name 100”)') : null,
         spec.key === 'quote' ? UI.field('Who can add quotes', UI.select(x, 'addPermission', UI.permissionOptions())) : null,
@@ -924,6 +924,9 @@
         preview.node),
     };
   }
+
+  // For the other tab files (the Song requests page).
+  Object.assign(UI, { overlayPreview, overlayBase, linkBuilder });
 
   UI.addTab('overlay', 'Overlay', (panel) => {
     const o = Bot.data.overlay;
