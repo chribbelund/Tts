@@ -211,7 +211,7 @@ function matchCommand(cmd, text) {
   if (!t) return null;
   if (cmd.match === 'regex') {
     try {
-      const m = new RegExp(cmd.trigger, 'i').exec(t);
+      const m = Bot.regex(cmd.trigger, 'i').exec(t);
       return m ? { args: m.length > 1 ? m.slice(1).filter((x) => x !== undefined) : words(t) } : null;
     } catch { return null; }
   }

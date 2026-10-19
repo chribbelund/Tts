@@ -137,6 +137,22 @@ function mergeDefaults(defaults, saved) {
 Bot.uid = (prefix = 'x') => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 Bot.clone = (v) => JSON.parse(JSON.stringify(v));
 
+// Patterns from the setup (regex commands, banned words) are tested against
+// every chat message, so each is compiled once. Throws on a bad pattern, like
+// new RegExp does.
+const regexCache = new Map();
+Bot.regex = (source, flags = '') => {
+  const id = `${flags}/${source}`;
+  let re = regexCache.get(id);
+  if (!re) {
+    re = new RegExp(source, flags);
+    if (regexCache.size >= 500) regexCache.delete(regexCache.keys().next().value);
+    regexCache.set(id, re);
+  }
+  re.lastIndex = 0;
+  return re;
+};
+
 Bot.on = (type, fn) => {
   if (!Bot.listeners.has(type)) Bot.listeners.set(type, new Set());
   Bot.listeners.get(type).add(fn);

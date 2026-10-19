@@ -142,7 +142,10 @@ Viewers.watching = () => {
 Viewers.recentChatters = (minutes = 15) => {
   const cutoff = Date.now() - minutes * 60000;
   const botLogin = Bot.twitch.accounts.bot && Bot.twitch.accounts.bot.login;
-  return Object.values(Bot.viewers.users).filter((v) => (v.lastChat || 0) > cutoff && v.login !== botLogin);
+  // Everyone who wrote in the last 15 minutes is still in `present`, which is
+  // far shorter than the whole viewer list.
+  const pool = minutes <= 15 ? [...Community.present.keys()].map((key) => Bot.viewers.users[key]).filter(Boolean) : Object.values(Bot.viewers.users);
+  return pool.filter((v) => (v.lastChat || 0) > cutoff && v.login !== botLogin);
 };
 
 Viewers.applyCurrency = (v, action, amount) => {
@@ -178,16 +181,33 @@ Viewers.balance = (user) => {
   return v ? Math.floor(v.currency || 0) : 0;
 };
 
+// One pass that keeps the n richest, instead of sorting every viewer.
 Viewers.top = (n = 10) => {
   const botLogin = Bot.twitch.accounts.bot && Bot.twitch.accounts.bot.login;
-  return Object.values(Bot.viewers.users).filter((v) => v.login !== botLogin && v.login !== Bot.twitch.streamerLogin())
-    .sort((a, b) => (b.currency || 0) - (a.currency || 0)).slice(0, n);
+  const streamer = Bot.twitch.streamerLogin();
+  const best = [];
+  for (const v of Object.values(Bot.viewers.users)) {
+    if (v.login === botLogin || v.login === streamer) continue;
+    const c = v.currency || 0;
+    if (best.length === n && c <= (best[n - 1].currency || 0)) continue;
+    let i = best.length;
+    while (i > 0 && (best[i - 1].currency || 0) < c) i--;
+    best.splice(i, 0, v);
+    if (best.length > n) best.pop();
+  }
+  return best;
 };
 
+// Their place on the leaderboard: one more than the number of viewers with more.
 Viewers.rank = (login) => {
-  const sorted = Object.values(Bot.viewers.users).sort((a, b) => (b.currency || 0) - (a.currency || 0));
-  const i = sorted.findIndex((v) => v.login === String(login || '').toLowerCase());
-  return i === -1 ? 0 : i + 1;
+  const name = String(login || '').toLowerCase();
+  const all = Object.values(Bot.viewers.users);
+  let mine = null;
+  for (const v of all) if (v.login === name && (mine === null || (v.currency || 0) > mine)) mine = v.currency || 0;
+  if (mine === null) return 0;
+  let above = 0;
+  for (const v of all) if ((v.currency || 0) > mine) above++;
+  return above + 1;
 };
 
 Viewers.remove = (key) => {
@@ -459,12 +479,12 @@ function bannedHit(text) {
     if (!word) continue;
     // Whole words only, so "class" doesn't trip over "ass". A * is a wildcard.
     const pattern = word.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '\\S*');
-    if (new RegExp(`(^|[^\\p{L}\\p{N}])${pattern}(?=$|[^\\p{L}\\p{N}])`, 'iu').test(lower)) return word;
+    if (Bot.regex(`(^|[^\\p{L}\\p{N}])${pattern}(?=$|[^\\p{L}\\p{N}])`, 'iu').test(lower)) return word;
   }
   for (const raw of m.bannedRegex.split('\n')) {
     const source = raw.trim();
     if (!source) continue;
-    try { if (new RegExp(source, 'i').test(text)) return source; } catch {}
+    try { if (Bot.regex(source, 'i').test(text)) return source; } catch {}
   }
   return null;
 }

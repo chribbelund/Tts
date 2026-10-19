@@ -98,7 +98,7 @@ async function checkOne(item, ctx) {
   switch (op) {
     case 'notContains': return !left.toLowerCase().includes(right.toLowerCase());
     case 'matches':
-      try { return new RegExp(right, 'i').test(left); } catch { return false; }
+      try { return Bot.regex(right, 'i').test(left); } catch { return false; }
     case 'empty': return !left.trim();
     case 'notEmpty': return !!left.trim();
     case 'role': return Bot.allowed(ctx.user, right || 'everyone');
