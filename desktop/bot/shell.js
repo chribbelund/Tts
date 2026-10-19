@@ -36,7 +36,7 @@
     },
     { group: 'Bot', pages: ['commands', 'events', 'rewards', 'timers', 'lists', 'counters'] },
     { group: 'Community', pages: ['viewers', 'points', 'quotes', 'moderation'] },
-    { group: 'Stream', pages: ['multistream', 'overlay', 'obs'] },
+    { group: 'Stream', pages: ['multistream', 'overlay', 'obs', 'spotify'] },
     {
       group: 'App',
       pages: [
@@ -242,6 +242,9 @@
     const o = Bot.overlayStatus || {};
     out.overlay = o.error ? { state: 'error', text: o.error } : o.running && o.clients ? { state: 'on', text: `${o.clients} open` } : null;
     out.obs = Bot.obs.state === 'connected' ? { state: 'on', text: 'Connected' } : Bot.obs.state === 'error' ? { state: 'error', text: Bot.obs.text } : null;
+    const sp = Bot.spotify;
+    if (sp.state === 'connected') out.spotify = sp.problem ? { state: 'error', text: sp.problem } : { state: 'on', text: `${Bot.data.spotify.queue.length} waiting` };
+    else if (sp.state === 'error') out.spotify = { state: 'error', text: sp.text };
     const ms = Bot.data.multistream;
     if (ms.enabled) {
       const errors = Object.values(Bot.relay.stats).map((x) => x.error).filter(Boolean);

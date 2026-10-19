@@ -70,6 +70,9 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
     youtubeLogin: (clientId) => ipcRenderer.invoke('youtube:login', { clientId }),
     cancelYoutubeLogin: () => ipcRenderer.invoke('youtube:cancel-login'),
     tiktokSend: (handle, text) => ipcRenderer.invoke('tiktok:send', { handle, text }),
+    // Spotify: logging in through the browser, back to the overlay server.
+    spotifyLogin: (clientId) => ipcRenderer.invoke('spotify:login', { clientId }),
+    cancelSpotifyLogin: () => ipcRenderer.invoke('spotify:cancel-login'),
     // Reading another bot's data to import: 'firebot-folder', 'firebot-setup' or 'mixitup'.
     readImport: (kind) => ipcRenderer.invoke('import:read', { kind }),
     onMainEvent: (handler) => {

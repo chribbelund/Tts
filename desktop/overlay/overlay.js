@@ -10,6 +10,9 @@ const instance = params.get('instance') || '';
 const counterName = (params.get('counter') || '').toLowerCase();
 // ?chat shows the multistream's chats together: &max= messages, &fade= seconds, &size= px.
 const chatMode = params.has('chat');
+// ?spotify shows the song playing: &next= songs of the queue under it, &art=0,
+// &requester=0, &progress=0, &idle=1 to stay up while paused, &size= px.
+const spotifyMode = params.has('spotify');
 const chatOnly = (params.get('platforms') || '').toLowerCase().split(',').filter(Boolean);
 
 const EXIT_MS = 520;
@@ -161,6 +164,42 @@ const handlers = {
     if (fade > 0) setTimeout(() => { item.classList.add('out'); setTimeout(() => item.remove(), EXIT_MS); }, fade * 1000);
   },
 
+  spotify(e) {
+    if (!spotifyMode) return;
+    spotify.last = e;
+    spotify.at = performance.now();
+    const box = document.getElementById('spotify');
+    const t = e.track;
+    const idle = !t || (!e.isPlaying && params.get('idle') !== '1');
+    box.classList.toggle('idle', idle);
+    if (t) {
+      const key = `${t.name}\n${t.artists}`;
+      const art = box.querySelector('.np-art');
+      if (params.get('art') !== '0' && t.image) { if (art.getAttribute('src') !== t.image) art.src = t.image; art.hidden = false; } else art.hidden = true;
+      box.querySelector('.np-label').textContent = e.requestedBy && params.get('requester') !== '0' ? `Requested by ${e.requestedBy}` : 'Now playing';
+      if (key !== spotify.key) {
+        spotify.key = key;
+        const title = box.querySelector('.np-title');
+        title.firstElementChild.textContent = t.name;
+        box.querySelector('.np-artist').textContent = t.artists;
+        const card = box.querySelector('.np');
+        card.classList.remove('changed');
+        void card.offsetWidth;
+        card.classList.add('changed');
+        requestAnimationFrame(() => marquee(title));
+      }
+    }
+    const max = Math.max(0, Math.min(10, Number(params.get('next')) || 0));
+    const list = box.querySelector('.np-next');
+    list.replaceChildren(...(e.next || []).slice(0, max).map((n) => {
+      const item = el('li');
+      item.append(el('span', 'np-next-title', n.name), el('span', 'np-next-artist', ` – ${n.artists}`));
+      if (n.by && params.get('requester') !== '0') item.append(el('span', 'np-next-by', n.by));
+      return item;
+    }));
+    list.hidden = !max || !list.children.length;
+  },
+
   counter(e) {
     if (!counterName || String(e.name).toLowerCase() !== counterName) return;
     const box = document.getElementById('counter');
@@ -192,6 +231,37 @@ if (chatMode) {
   if (params.has('background')) list.style.setProperty('--chat-box', `rgba(10, 8, 20, ${Math.max(0, Math.min(1, Number(params.get('background')) || 0))})`);
 }
 
+// The song playing: the bar moves on between the app's updates, and a title
+// too long for the box scrolls.
+const spotify = { last: null, at: 0, key: '' };
+
+function marquee(title) {
+  const span = title.firstElementChild;
+  const over = span.scrollWidth - title.clientWidth;
+  title.classList.toggle('scroll', over > 4);
+  title.style.setProperty('--over', `${-over - 24}px`);
+  title.style.setProperty('--secs', `${Math.max(6, over / 30)}s`);
+}
+
+function spotifyFrame() {
+  const e = spotify.last;
+  if (e && e.track && e.track.durationMs) {
+    const ms = e.progressMs + (e.isPlaying ? performance.now() - spotify.at : 0);
+    document.querySelector('#spotify .np-bar span').style.width = `${Math.min(100, (ms / e.track.durationMs) * 100)}%`;
+  }
+  requestAnimationFrame(spotifyFrame);
+}
+
+if (spotifyMode) {
+  const box = document.getElementById('spotify');
+  box.hidden = false;
+  box.classList.add('idle');
+  document.getElementById('stage').hidden = true;
+  if (Number(params.get('size')) > 0) box.style.setProperty('--np-size', `${Number(params.get('size'))}px`);
+  if (params.get('progress') === '0') box.querySelector('.np-bar').hidden = true;
+  requestAnimationFrame(spotifyFrame);
+}
+
 const query = new URLSearchParams();
 if (instance) query.set('instance', instance);
 if (params.has('preview')) query.set('preview', '1');  // the app's own previews
@@ -200,6 +270,9 @@ source.onmessage = (msg) => {
   let event;
   try { event = JSON.parse(msg.data); } catch { return; }
   const handler = handlers[event.type];
-  const wanted = event.type === 'style' || (counterName ? event.type === 'counter' : chatMode ? event.type === 'chat' : event.type !== 'counter' && event.type !== 'chat');
+  const wanted = event.type === 'style' || (counterName ? event.type === 'counter'
+    : chatMode ? event.type === 'chat'
+      : spotifyMode ? event.type === 'spotify'
+        : !['counter', 'chat', 'spotify'].includes(event.type));
   if (handler && wanted) handler(event);
 };

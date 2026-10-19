@@ -102,6 +102,7 @@ const overlay = {
   counters: new Map(),     // name -> last counter event, replayed to new overlays
   catalog: [],             // effect lists the API can run: [{ id, name }]
   styles: { style: {}, css: '', instances: new Map() },  // instance name -> { style, css }
+  spotify: null,           // the last "now playing" event, replayed to new overlays
   secret: crypto.randomBytes(16).toString('hex'),
   heartbeat: null,
 };
@@ -152,10 +153,11 @@ function withMediaUrls(value) {
 function broadcast(event) {
   const data = withMediaUrls(event);
   if (data.type === 'counter' && data.name) overlay.counters.set(String(data.name).toLowerCase(), data);
+  if (data.type === 'spotify') overlay.spotify = data;
   const line = `data: ${JSON.stringify(data)}\n\n`;
   for (const client of overlay.clients) {
     // An instance only gets what's meant for it; '' is every overlay.
-    if (data.instance && client.instance !== data.instance && data.type !== 'counter') continue;
+    if (data.instance && client.instance !== data.instance && data.type !== 'counter' && data.type !== 'spotify') continue;
     client.res.write(line);
   }
 }
@@ -231,10 +233,13 @@ function handleRequest(req, res) {
     overlay.clients.add(client);
     res.write(`data: ${JSON.stringify(styleEvent(client.instance))}\n\n`);
     for (const counter of overlay.counters.values()) res.write(`data: ${JSON.stringify(counter)}\n\n`);
+    if (overlay.spotify) res.write(`data: ${JSON.stringify(overlay.spotify)}\n\n`);
     req.on('close', () => { overlay.clients.delete(client); if (!client.preview) notifyPage('overlay', overlayStatus()); });
     if (!client.preview) notifyPage('overlay', overlayStatus());
     return;
   }
+
+  if (url.pathname === '/spotify/callback') { spotifyCallback(url, res); return; }
 
   if (parts[0] === 'media' && parts[1]) {
     const file = overlay.media.get(parts[1]);
@@ -294,6 +299,64 @@ function startServer(port) {
 function notifyPage(type, payload) {
   const win = getWindow();
   if (win && !win.isDestroyed()) win.webContents.send('bot:main-event', { type, payload });
+}
+
+// ---------------------------------------------------------------------------
+// Spotify login: authorization code with PKCE. Spotify sends the browser back
+// to the overlay server (http://127.0.0.1:<port>/spotify/callback), which has
+// to be the redirect URI in the streamer's Spotify app. The page keeps the
+// tokens; the refresh token goes in the secrets like Twitch's.
+// ---------------------------------------------------------------------------
+
+const SPOTIFY_SCOPES = 'user-read-playback-state user-modify-playback-state user-read-currently-playing';
+let spotifyLogin = null;   // { state, verifier, clientId, redirectUri, resolve, timer }
+
+const b64url = (buf) => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+function endSpotifyLogin(result) {
+  if (!spotifyLogin) return;
+  const { resolve, timer } = spotifyLogin;
+  spotifyLogin = null;
+  clearTimeout(timer);
+  resolve(result);
+}
+
+function spotifyPage(res, status, text) {
+  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+  const safe = String(text).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  res.end(`<!doctype html><meta charset="utf-8"><title>Chat Reader</title><body style="font:16px system-ui,sans-serif;padding:3em;text-align:center"><p>${safe}</p></body>`);
+}
+
+async function spotifyCallback(url, res) {
+  const login = spotifyLogin;
+  if (!login || url.searchParams.get('state') !== login.state) {
+    spotifyPage(res, 400, 'This Spotify login has expired. Start it again from the app.');
+    return;
+  }
+  const error = url.searchParams.get('error');
+  if (error) {
+    spotifyPage(res, 200, 'Spotify wasn’t connected. You can close this tab.');
+    endSpotifyLogin({ error: error === 'access_denied' ? 'You said no on Spotify’s page' : error });
+    return;
+  }
+  try {
+    const r = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code', code: url.searchParams.get('code') || '',
+        redirect_uri: login.redirectUri, client_id: login.clientId, code_verifier: login.verifier,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || !body.access_token) throw new Error(body.error_description || body.error || `Spotify said ${r.status}`);
+    spotifyPage(res, 200, 'Spotify is connected. You can close this tab and go back to Chat Reader.');
+    endSpotifyLogin({ accessToken: body.access_token, refreshToken: body.refresh_token || '', expiresIn: body.expires_in || 3600, scope: body.scope || '' });
+  } catch (err) {
+    spotifyPage(res, 500, `Connecting Spotify didn’t work: ${err.message}`);
+    endSpotifyLogin({ error: err.message });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +491,25 @@ function setup(options) {
       : [];
   });
   ipcMain.on('overlay:open', () => shell.openExternal(overlayStatus().url));
+
+  ipcMain.handle('spotify:login', (_event, { clientId = '' } = {}) => {
+    if (!/^[0-9a-f]{32}$/i.test(String(clientId))) return { error: 'That doesn’t look like a Spotify Client ID (32 letters and digits)' };
+    if (!overlayStatus().running) return { error: 'Turn on the overlay (Stream → Overlay) first: Spotify sends you back to it after logging in' };
+    endSpotifyLogin({ error: 'Started again' });
+    const verifier = b64url(crypto.randomBytes(48));
+    const state = b64url(crypto.randomBytes(16));
+    const redirectUri = `http://127.0.0.1:${overlay.port}/spotify/callback`;
+    const auth = new URL('https://accounts.spotify.com/authorize');
+    auth.search = new URLSearchParams({
+      response_type: 'code', client_id: clientId, scope: SPOTIFY_SCOPES, redirect_uri: redirectUri, state,
+      code_challenge_method: 'S256', code_challenge: b64url(crypto.createHash('sha256').update(verifier).digest()),
+    }).toString();
+    return new Promise((resolve) => {
+      spotifyLogin = { state, verifier, clientId, redirectUri, resolve, timer: setTimeout(() => endSpotifyLogin({ error: 'Timed out waiting for Spotify' }), 5 * 60 * 1000) };
+      shell.openExternal(auth.toString());
+    });
+  });
+  ipcMain.handle('spotify:cancel-login', () => { endSpotifyLogin({ error: 'Cancelled' }); return true; });
 
   app.on('will-quit', () => { clearInterval(overlay.heartbeat); stopServer(); db.close(); });
 }

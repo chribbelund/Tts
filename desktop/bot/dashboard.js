@@ -25,6 +25,7 @@
     { id: 'multistream', title: 'Multistream', page: 'multistream' },
     { id: 'overlay', title: 'Overlay', page: 'overlay' },
     { id: 'obs', title: 'OBS', page: 'obs' },
+    { id: 'spotify', title: 'Song requests', page: 'spotify' },
   ];
 
   function cardState(id) {
@@ -85,6 +86,15 @@
       const st = Bot.obs.state;
       return { value: { connected: 'Connected', connecting: 'Connecting…', error: 'Not connected', idle: Bot.data.obs.enabled ? 'Not connected' : 'Off' }[st], detail: st === 'error' ? Bot.obs.text : '', state: st === 'connected' ? 'on' : st === 'error' ? 'error' : '' };
     }
+    if (id === 'spotify') {
+      const sp = Bot.spotify;
+      const waiting = plural(Bot.data.spotify.queue.length, 'request');
+      if (sp.state === 'connected') {
+        const n = sp.now;
+        return { value: n ? n.name : 'Nothing playing', detail: sp.problem || `${n && !n.isPlaying ? 'Paused · ' : ''}${waiting} waiting${Bot.data.spotify.requests ? '' : ' · closed'}`, state: sp.problem ? 'error' : n && n.isPlaying ? 'on' : '' };
+      }
+      return { value: sp.state === 'connecting' ? 'Connecting…' : sp.state === 'error' ? 'Not connected' : 'Off', detail: sp.state === 'error' ? sp.text : 'Connect Spotify for !sr', state: sp.state === 'error' ? 'error' : '' };
+    }
     return { value: '', detail: '', state: '' };
   }
 
@@ -125,7 +135,7 @@
     if (!tab || !tab.update || !UI.isShown(tab) || statusTimer) return;
     statusTimer = setTimeout(() => { statusTimer = null; if (UI.isShown(tab)) tab.update(); }, 200);
   };
-  for (const type of ['reader', 'stream', 'live', 'eventsub', 'accounts', 'obs', 'overlay', 'relay']) Bot.on(type, refreshStatus);
+  for (const type of ['reader', 'stream', 'live', 'eventsub', 'accounts', 'obs', 'overlay', 'relay', 'spotify', 'spotify-queue', 'spotify-now']) Bot.on(type, refreshStatus);
   // The uptime moves on by itself.
   setInterval(refreshStatus, 30000);
 

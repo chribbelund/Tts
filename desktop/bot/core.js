@@ -89,6 +89,23 @@ const BOT_DEFAULTS = {
     counterLink: { name: '', instance: '', label: '', size: '', color: '', font: '' },
   },
   obs: { enabled: false, url: 'ws://127.0.0.1:4455', autoConnect: true },
+  // Song requests through Spotify (spotify.js). The queue is the app's own;
+  // each song goes to Spotify's queue shortly before the one playing ends.
+  spotify: {
+    clientId: '',
+    requests: true,          // chat can request songs
+    autoplay: true,          // hand the requests to Spotify one by one
+    maxPerUser: 2,           // songs one viewer can have waiting (0 = no limit); mods and you aren't limited
+    maxMinutes: 10,          // longest song allowed (0 = any length)
+    maxQueue: 50,            // songs waiting in all (0 = no limit)
+    noExplicit: false,
+    noDuplicates: true,
+    blocked: '',             // words, artists or Spotify links nobody may request
+    sendAhead: 15,           // seconds before a song ends that the next request goes to Spotify
+    queue: [],               // [{ id, uri, name, artists, album, image, durationMs, explicit, by: { login, displayName, platform }, at, sent }]
+    history: [],             // the last requests that played
+    overlayLink: { next: 0, art: true, requester: true, progress: true, hideIdle: true, size: '' },
+  },
   sound: { device: '', volume: 100 },
   // Multistream: the three chats joined up (relay.js).
   multistream: {
