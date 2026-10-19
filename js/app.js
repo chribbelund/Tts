@@ -3279,6 +3279,30 @@ const host = {
     return [...pool, ...ids.filter((id) => !pool.includes(id))].map((id) => ({ id, name: voiceName(engine, id), inPool: pool.includes(id) }));
   },
 
+  // Starts reading a chat, from the desktop app's setup guide: it goes in an
+  // empty field of its platform, or a new one, unless a field has it already.
+  // False when there's no room for another chat.
+  readChat(platform, input) {
+    const target = String(input || '').trim();
+    if (!target || !PLATFORMS[platform]) return false;
+    const key = (text) => NORMALIZE[platform](text) || text.trim();
+    if (!chats.some((c) => c.platform === platform && key(c.input) === key(target))) {
+      const empty = chats.find((c) => c.platform === platform && !c.input.trim());
+      if (empty) {
+        empty.input = target;
+        if (empty.inputEl) empty.inputEl.value = target;
+      } else if (chats.length < MAX_CHATS) {
+        chats.push(createChat(platform, target));
+      } else {
+        return false;
+      }
+      saveChatList();
+      renderChatFields();
+    }
+    connectChats({ toggle: false });
+    return true;
+  },
+
   // The chats in the top bar, for the bot's multistream relay to reuse.
   readerChats: () => chats.filter(isActive).map((c) => ({ id: c.id, platform: c.platform, target: c.client.channel, state: c.state, videoId: c.client.videoId || '' })),
 
@@ -3375,7 +3399,7 @@ function loadBot() {
   if (!base) return;
   document.head.append(el('link', { rel: 'stylesheet', href: `${base}bot.css` }));
   // In order, each after the one before, like the <script> tags above.
-  const files = ['core.js', 'twitch.js', 'eventsub.js', 'variables.js', 'effects.js', 'triggers.js', 'community.js', 'obs.js', 'relay.js', 'importers.js', 'ui.js', 'ui-tabs.js', 'ui-multistream.js', 'dashboard.js', 'integrations.js', 'shell.js', 'start.js'];
+  const files = ['core.js', 'twitch.js', 'eventsub.js', 'variables.js', 'effects.js', 'triggers.js', 'community.js', 'obs.js', 'relay.js', 'importers.js', 'ui.js', 'ui-tabs.js', 'ui-multistream.js', 'dashboard.js', 'integrations.js', 'shell.js', 'setup.js', 'start.js'];
   const next = (i) => {
     if (i >= files.length) return;
     const script = el('script', { src: `${base}${files[i]}` });

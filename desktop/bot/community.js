@@ -60,14 +60,16 @@ function accrue() {
   }
   const botLogin = Bot.twitch.accounts.bot && Bot.twitch.accounts.bot.login;
   for (const [key, at] of Community.present) if (now - at > 15 * 60000) Community.present.delete(key);
+  const changed = [];
   for (const v of Viewers.watching()) {
     if (v.platform === 'twitch' && v.login === botLogin) continue;
+    changed.push(v);
     if (Community.live) v.minutes = (v.minutes || 0) + 1;
     if (!cur.enabled) continue;
     if (cur.activeOnly && now - (v.lastChat || 0) > 15 * 60000) continue;
     Viewers.applyCurrency(v, 'add', Number(cur.perMinute || 0) + ((v.role || 0) >= 1 ? Number(cur.subBonus || 0) : 0));
   }
-  Bot.saveViewers();
+  if (changed.length) Bot.saveViewers(changed);
   Bot.emit('viewers');
 }
 
@@ -118,7 +120,7 @@ Viewers.noteChat = (msg) => {
   Community.present.set(v.key, now);
   const firstThisStream = v.session !== Community.session;
   v.session = Community.session;
-  Bot.saveViewers();
+  Bot.saveViewers(v);
   return { firstEver: isNew, firstThisStream };
 };
 
@@ -128,7 +130,7 @@ Viewers.noteEvent = (user, type, fields) => {
   if (type === 'cheer') v.bits = (v.bits || 0) + (Number(fields.bits) || 0);
   if (type === 'sub' || type === 'resub') v.subTier = fields.tier;
   if (type === 'giftSub') v.giftsGiven = (v.giftsGiven || 0) + (Number(fields.giftCount) || 0);
-  Bot.saveViewers();
+  Bot.saveViewers(v);
 };
 
 // Here now: in the last chatters list (10 minutes), or wrote something in the last 10 minutes.
@@ -157,7 +159,7 @@ Viewers.changeCurrency = (login, platform, action, amount, user = null) => {
   if (!v && login) v = Viewers.ensure({ platform, login, displayName: login });
   if (!v) return null;
   Viewers.applyCurrency(v, action, amount);
-  Bot.saveViewers();
+  Bot.saveViewers(v);
   Bot.emit('viewers');
   return v;
 };
@@ -166,7 +168,7 @@ Viewers.spend = (user, cost) => {
   const v = Viewers.byLogin(user.login, user.platform);
   if (!v || (v.currency || 0) < cost) return false;
   v.currency -= cost;
-  Bot.saveViewers();
+  Bot.saveViewers(v);
   Bot.emit('viewers');
   return true;
 };
@@ -190,7 +192,7 @@ Viewers.rank = (login) => {
 
 Viewers.remove = (key) => {
   delete Bot.viewers.users[key];
-  Bot.saveViewers();
+  Bot.saveViewers(key);
   Bot.emit('viewers');
 };
 

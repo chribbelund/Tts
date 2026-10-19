@@ -609,7 +609,7 @@
             h('span', { class: 'hint' }, [Bot.host.nickname(v.login) ? `“${Bot.host.nickname(v.login)}”` : '', Bot.host.chatterVoice(v.login), Bot.host.isIgnored(v.login) ? 'ignored' : ''].filter(Boolean).join(' · ')),
             String(v.messages || 0),
             Bot.duration((v.minutes || 0) * 60),
-            UI.number(v, 'currency', { min: 0, onChange: () => { Bot.saveViewers(); } }),
+            UI.number(v, 'currency', { min: 0, onChange: () => { Bot.saveViewers(v); } }),
             UI.date(v.firstSeen),
             UI.date(v.lastSeen),
             h('span', { class: 'bot-row-actions' },
@@ -825,12 +825,198 @@
   // Overlay
   // -------------------------------------------------------------------------
 
+  const STYLE_DEFAULTS = { font: '', textColor: '#ffffff', accent: '#a37bff', shadow: 'soft', boxColor: '#0a0814', boxOpacity: 78, radius: 12, scale: 100 };
+  const FONTS = ['Arial', 'Helvetica', 'Verdana', 'Trebuchet MS', 'Georgia', 'Impact', 'Comic Sans MS', 'Courier New', 'Segoe UI', 'Roboto', 'Montserrat', 'Poppins', 'Bebas Neue'];
+  const SHADOWS = [['soft', 'Soft'], ['strong', 'Strong'], ['outline', 'Black outline'], ['none', 'None']];
+  const overlayBase = () => (Bot.overlayStatus && Bot.overlayStatus.url) || `http://127.0.0.1:${Bot.data.overlay.port}/`;
+
+  // A live, scaled-down copy of an overlay link. Previews don't count as
+  // open overlays.
+  function overlayPreview(getUrl) {
+    const frame = h('iframe', { title: 'Overlay preview', tabindex: '-1' });
+    const box = h('div', { class: 'overlay-preview' }, frame);
+    const fit = () => { if (box.clientWidth) frame.style.transform = `scale(${box.clientWidth / 1920})`; };
+    new ResizeObserver(fit).observe(box);
+    let timer = null;
+    const load = () => {
+      const url = new URL(getUrl());
+      url.searchParams.set('preview', '1');
+      frame.src = url.toString();
+    };
+    load();
+    return { node: box, reload: () => { clearTimeout(timer); timer = setTimeout(load, 300); } };
+  }
+
+  // The style controls. With `inherit`, each one can be left to the shared
+  // style (an instance only keeps what it changes).
+  function styleControls(target, { inherit = null, onChange }) {
+    const rows = [];
+    const add = (key, label, makeControl) => {
+      if (!inherit) { rows.push(UI.field(label, makeControl(target))); return; }
+      const slot = h('span', { class: 'bot-inline' });
+      const draw = () => {
+        const own = key in target;
+        slot.replaceChildren(own ? makeControl(target) : h('span', { class: 'hint' }, 'Same as every overlay'));
+      };
+      const state = { own: key in target };
+      const toggle = UI.check(state, 'own', 'Change', {
+        onChange: (on) => {
+          if (on) target[key] = inherit[key] ?? STYLE_DEFAULTS[key];
+          else delete target[key];
+          draw();
+          onChange(true);
+        },
+      });
+      draw();
+      rows.push(UI.field(label, h('span', { class: 'bot-inline' }, toggle, slot)));
+    };
+    const soon = () => onChange(false);
+    add('font', 'Font', (t) => UI.text(t, 'font', { placeholder: 'The app’s default', list: 'overlay-fonts', onChange: soon }));
+    add('textColor', 'Text colour', (t) => UI.color(t, 'textColor', { onChange: soon }));
+    add('accent', 'Highlight colour', (t) => UI.color(t, 'accent', { onChange: soon }));
+    add('shadow', 'Text shadow', (t) => UI.select(t, 'shadow', SHADOWS, { onChange: () => onChange(true) }));
+    add('boxColor', 'Box colour', (t) => UI.color(t, 'boxColor', { onChange: soon }));
+    add('boxOpacity', 'Box opacity', (t) => UI.range(t, 'boxOpacity', { min: 0, max: 100, onChange: soon }));
+    add('radius', 'Corner rounding', (t) => UI.range(t, 'radius', { min: 0, max: 40, suffix: 'px', onChange: soon }));
+    add('scale', 'Text size', (t) => UI.range(t, 'scale', { min: 50, max: 250, step: 5, onChange: soon }));
+    return h('div', { class: 'bot-grid overlay-style' }, rows);
+  }
+
+  const CSS_HINT = 'Applied after the overlay’s own styles. Things to style: .alert, .alert-title, .alert-message, .text, #counter, #chat li, .chat-user, .chat-text, .chat-platform. The style above is in variables you can use too: var(--accent), var(--text), var(--box-bg), var(--radius).';
+
+  function chatLinkUrl() {
+    const c = Bot.data.overlay.chatLink;
+    const q = ['chat'];
+    if (c.instance.trim()) q.push(`instance=${encodeURIComponent(c.instance.trim())}`);
+    if (Number(c.max) && Number(c.max) !== 12) q.push(`max=${Number(c.max)}`);
+    if (Number(c.fade) > 0) q.push(`fade=${Number(c.fade)}`);
+    if (Number(c.size) > 0) q.push(`size=${Number(c.size)}`);
+    if (String(c.background).trim() !== '' && Number.isFinite(Number(c.background))) q.push(`background=${Math.max(0, Math.min(100, Number(c.background))) / 100}`);
+    if (!c.badges) q.push('badges=0');
+    const on = Object.keys(c.platforms).filter((p) => c.platforms[p]);
+    if (on.length && on.length < 3) q.push(`platforms=${on.join(',')}`);
+    return `${overlayBase()}?${q.join('&')}`;
+  }
+
+  function counterLinkUrl() {
+    const c = Bot.data.overlay.counterLink;
+    const name = c.name || (Bot.data.counters[0] && Bot.data.counters[0].name) || '';
+    const q = [`counter=${encodeURIComponent(name)}`];
+    if (c.instance.trim()) q.push(`instance=${encodeURIComponent(c.instance.trim())}`);
+    if (c.label) q.push(`label=${encodeURIComponent(c.label)}`);
+    if (Number(c.size) > 0) q.push(`size=${Number(c.size)}`);
+    if (c.color) q.push(`color=${c.color.replace('#', '')}`);
+    if (c.font.trim()) q.push(`font=${encodeURIComponent(c.font.trim())}`);
+    return `${overlayBase()}?${q.join('&')}`;
+  }
+
+  // A link and its preview, kept in step with the controls above them.
+  function linkBuilder(controls, getUrl, buttons) {
+    const code = h('code', { class: 'code-box' }, getUrl());
+    const preview = overlayPreview(getUrl);
+    const changed = () => { save(); code.textContent = getUrl(); preview.reload(); };
+    return {
+      changed,
+      node: h('div', { class: 'overlay-builder' },
+        h('div', { class: 'overlay-builder-controls' }, ...controls(changed),
+          UI.row(code, UI.copyButton(getUrl)),
+          UI.row(...buttons)),
+        preview.node),
+    };
+  }
+
   UI.addTab('overlay', 'Overlay', (panel) => {
     const o = Bot.data.overlay;
     const s = Bot.overlayStatus || {};
     const status = UI.status();
     const url = s.url || `http://127.0.0.1:${o.port}/`;
+    const running = !!s.running;
+    const testAlert = () => Bot.effects.run([{ ...Bot.effects.newEffect('alert'), title: 'It works!', message: 'This is a test alert from Chat Reader.' }], UI.testContext());
+    const testText = (instance = '') => Bot.effects.run([{ ...Bot.effects.newEffect('text'), text: 'Some text on stream', background: 'dark', instance }], UI.testContext());
+    const styleChanged = (now) => { save(); if (now) Bot.applyOverlayStyle(); else Bot.applyOverlayStyleSoon(); };
+    const notRunning = () => h('p', { class: 'hint' }, 'Turn on “Run the overlay” to see a preview here.');
+
+    const mainPreview = running ? overlayPreview(() => url).node : notRunning();
+
+    // Instances
+    const instanceList = h('div', { class: 'overlay-instances' });
+    const drawInstances = () => {
+      instanceList.replaceChildren(...(o.instances.length ? o.instances.map((inst) => {
+        const instUrl = () => `${url}?instance=${encodeURIComponent(inst.name.trim())}`;
+        const title = h('span', {}, inst.name || '(no name)');
+        return h('details', { class: 'fx-more overlay-instance' },
+          h('summary', {}, title),
+          UI.row(
+            UI.field('Name', UI.text(inst, 'name', { placeholder: 'e.g. alerts', onChange: () => { title.textContent = inst.name || '(no name)'; styleChanged(false); } })),
+            UI.copyButton(instUrl, 'Copy link'),
+            UI.button('Test text', () => testText(inst.name.trim())),
+            UI.button('🗑', () => {
+              if (!confirm(`Delete the overlay instance “${inst.name}”? Its link keeps working with the shared style.`)) return;
+              o.instances = o.instances.filter((x) => x !== inst);
+              styleChanged(true);
+              drawInstances();
+            }, { cls: 'x', aria: `Delete ${inst.name}`, title: 'Delete' })),
+          styleControls(inst.style, { inherit: o.style, onChange: styleChanged }),
+          UI.field('Extra CSS for this instance', UI.text(inst, 'css', { multiline: true, rows: 4, onChange: () => styleChanged(false) })));
+      }) : [h('p', { class: 'hint bot-empty' }, 'No instances with their own style yet.')]));
+    };
+    drawInstances();
+    const newInstance = { name: '' };
+    const addInstance = () => {
+      const name = newInstance.name.trim();
+      if (!name || o.instances.some((i) => i.name.trim().toLowerCase() === name.toLowerCase())) return;
+      o.instances.push({ id: Bot.uid('i'), name, style: {}, css: '' });
+      newInstance.name = '';
+      instanceInput.value = '';
+      styleChanged(true);
+      drawInstances();
+    };
+    const instanceInput = UI.text(newInstance, 'name', { placeholder: 'e.g. alerts' });
+    instanceInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addInstance(); } });
+
+    // Link builders
+    const cl = o.chatLink;
+    const chat = linkBuilder((changed) => [
+      UI.row(
+        UI.field('Messages shown', UI.number(cl, 'max', { min: 1, max: 50, onChange: changed })),
+        UI.field('Fade after (seconds, 0 = never)', UI.number(cl, 'fade', { min: 0, max: 600, onChange: changed })),
+        UI.field('Text size (px)', UI.text(cl, 'size', { type: 'number', placeholder: 'style', cls: 'short', onChange: changed })),
+        UI.field('Box opacity (%)', UI.text(cl, 'background', { type: 'number', placeholder: 'style', cls: 'short', onChange: changed }))),
+      UI.row(
+        UI.check(cl, 'badges', 'Platform tags', { onChange: changed }),
+        UI.check(cl.platforms, 'twitch', 'Twitch', { onChange: changed }),
+        UI.check(cl.platforms, 'youtube', 'YouTube', { onChange: changed }),
+        UI.check(cl.platforms, 'tiktok', 'TikTok', { onChange: changed })),
+      UI.field('Instance', UI.text(cl, 'instance', { placeholder: 'none', list: 'overlay-instance-names', onChange: changed })),
+    ], chatLinkUrl, [UI.button('Show test messages', () => Bot.relay.testOverlay())]);
+
+    const kl = o.counterLink;
+    const counterOptions = () => (Bot.data.counters.length ? Bot.data.counters.map((c) => [c.name, c.name]) : [['', 'No counters yet']]);
+    const counter = linkBuilder((changed) => {
+      const colorSlot = h('span', { class: 'bot-inline' });
+      const ownColor = { on: !!kl.color };
+      const drawColor = () => colorSlot.replaceChildren(ownColor.on ? UI.color(kl, 'color', { onChange: changed }) : h('span', { class: 'hint' }, 'From the style'));
+      drawColor();
+      return [
+        UI.row(
+          UI.field('Counter', UI.select(kl, 'name', counterOptions, { onChange: changed })),
+          UI.field('Text before the number', UI.text(kl, 'label', { placeholder: 'Deaths: ', onChange: changed })),
+          UI.field('Text size (px)', UI.text(kl, 'size', { type: 'number', placeholder: 'style', cls: 'short', onChange: changed }))),
+        UI.row(
+          UI.field('Colour', h('span', { class: 'bot-inline' }, UI.check(ownColor, 'on', 'Own colour', {
+            onChange: (on) => { kl.color = on ? (o.style.textColor || '#ffffff') : ''; drawColor(); changed(); },
+          }), colorSlot)),
+          UI.field('Font', UI.text(kl, 'font', { placeholder: 'style', list: 'overlay-fonts', onChange: changed })),
+          UI.field('Instance', UI.text(kl, 'instance', { placeholder: 'none', list: 'overlay-instance-names', onChange: changed }))),
+      ];
+    }, counterLinkUrl, [UI.button('Bump counter', () => {
+      const name = kl.name || (Bot.data.counters[0] && Bot.data.counters[0].name);
+      if (name) Bot.counters.update(name, 'add', 1);
+    }, { disabled: !Bot.data.counters.length })]);
+
     panel.append(
+      h('datalist', { id: 'overlay-fonts' }, FONTS.map((f) => h('option', { value: f }))),
+      h('datalist', { id: 'overlay-instance-names' }, o.instances.map((i) => h('option', { value: i.name }))),
       UI.lead('Alerts, pictures, videos, text and counters appear on stream through an overlay: a web page OBS shows as a browser source.'),
       h('div', { class: 'bot-card', 'data-state': s.running ? 'on' : s.error ? 'error' : '' },
         h('div', { class: 'bot-card-title' }, 'Overlay'),
@@ -844,14 +1030,34 @@
           h('li', {}, 'URL: ', h('code', { class: 'code-box' }, url), ' ', UI.copyButton(() => url)),
           h('li', {}, 'Width 1920, height 1080 (or your canvas size). Tick “Control audio via OBS” to hear its sounds on stream.'),
           h('li', {}, 'Put it on top of your scenes. Every alert, picture, video and text shows up there.')),
-        UI.row(UI.button('Open it in the browser', () => Bot.desktop.openOverlay()), UI.button('Send a test alert', () => Bot.effects.run([{ ...Bot.effects.newEffect('alert'), title: 'It works!', message: 'This is a test alert from Chat Reader.' }], UI.testContext()))),
+        UI.row(UI.button('Open it in the browser', () => Bot.desktop.openOverlay()), UI.button('Send a test alert', testAlert), UI.button('Send test text', () => testText())),
         status),
+      UI.section('Style',
+        UI.lead('How alerts, text, counters and the combined chat look on every overlay. Changes show up straight away, without refreshing OBS. Alerts and text set to their own colours in an effect keep them.'),
+        h('div', { class: 'overlay-builder' },
+          h('div', { class: 'overlay-builder-controls' },
+            styleControls(o.style, { onChange: styleChanged }),
+            UI.row(UI.button('Reset to default', () => {
+              if (!confirm('Put the overlay style back to how it was at first?')) return;
+              o.style = { ...STYLE_DEFAULTS };
+              styleChanged(true);
+              UI.rerender();
+            }))),
+          mainPreview),
+        h('p', { class: 'hint' }, 'Fonts must be installed on this computer. The preview shows what is sent to every overlay: use the test buttons above.')),
+      UI.section('Custom CSS',
+        UI.text(o, 'css', { multiline: true, rows: 8, placeholder: '.alert-title { letter-spacing: 2px; }', onChange: () => styleChanged(false) }),
+        h('p', { class: 'hint' }, CSS_HINT)),
       UI.section('Instances',
-        UI.lead('Several overlays can show different things: add ?instance=name to the URL (e.g. one for alerts, one for a camera frame) and pick that instance in an effect’s “More options”. An effect with no instance shows on every overlay.')),
-      UI.section('Counters on stream',
-        UI.lead('A counter alone, updating live: add ?counter=name to the URL, e.g.'),
-        h('p', { class: 'code-box' }, `${url}?counter=deaths&label=Deaths: &size=64&color=ffffff`),
-        h('p', { class: 'hint' }, 'label is shown before the number; size is in pixels; color is a hex colour without the #.')),
+        UI.lead('Several overlays can show different things: add ?instance=name to the URL (e.g. one for alerts, one for a camera frame) and pick that instance in an effect’s “More options”. An effect with no instance shows on every overlay. Add an instance here to give it its own style.'),
+        UI.row(instanceInput, UI.button('+ Add instance', addInstance, { cls: 'btn small primary' })),
+        instanceList),
+      UI.section('Combined chat on stream',
+        UI.lead('Twitch, YouTube and TikTok chat together (set up under Multistream). Pick the options, then copy the link into an OBS Browser source.'),
+        running ? chat.node : notRunning()),
+      UI.section('Counter on stream',
+        UI.lead('A counter alone, updating live. Leave a box empty to use the style above.'),
+        running ? counter.node : notRunning()),
     );
   }, { listens: ['overlay'] });
 
@@ -970,6 +1176,9 @@
     const clientInput = UI.text(d, 'clientId', { placeholder: 'e.g. abcd1234efgh5678…', onChange: () => { d.clientId = d.clientId.trim(); save(); } });
     clientInput.addEventListener('change', UI.rerender);
     panel.append(
+      h('div', { class: 'bot-account setup-again' },
+        h('div', {}, h('strong', {}, 'Setup guide'), h('div', { class: 'hint' }, 'Step by step through the Twitch application, logging in, your chats, the voice, OBS and the shortcuts.')),
+        UI.button('Run the setup guide', () => Bot.setup.open(), { cls: 'btn small' })),
       UI.section('1. Your Twitch application',
         UI.lead('The bot logs in through a Twitch application of your own, which takes a minute to make and is free:'),
         h('ol', { class: 'bot-steps' },

@@ -14,6 +14,7 @@ files:
   - preload.js
   - accelerator.js
   - bot-main.js
+  - db-main.js
   - multistream-main.js
   - import-main.js
   - bot/**/*

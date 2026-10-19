@@ -128,6 +128,11 @@ Settings dialog.
 
 ### Setting it up
 
+The first time the app opens, a setup guide walks through these steps one at a time (plus
+the chats to read, the voice, OBS's WebSocket, the shortcuts and a few starter alerts).
+Every step can be skipped. Run it again from *Accounts → Run the setup guide*, or on macOS
+from *Settings → Setup guide…*.
+
 1. **Make a Twitch application** (once, free): on
    [dev.twitch.tv/console/apps/create](https://dev.twitch.tv/console/apps/create) give it any
    name, `http://localhost` as the OAuth Redirect URL, category *Chat Bot* and Client Type
@@ -157,7 +162,7 @@ Settings dialog.
 | Points & games | Points for watching, with a sub bonus; slots, gamble, heist and raffles |
 | Quotes | Numbered quotes, from chat or added here |
 | Moderation | Banned words and regex, links (with `!permit`), caps, symbols, emotes, length and repeats; delete, warn and time out, stricter with repeat offenders |
-| Overlay | The OBS browser source, its instances and counter widgets |
+| Overlay | The OBS browser source; its style (font, colours, text shadow, boxes, size) and custom CSS, sent live to open overlays; instances with their own style; link builders with live previews for the combined chat and counter widgets |
 | OBS | Connects to OBS's WebSocket server (Tools → WebSocket Server Settings) |
 | Accounts | Logins, who replies, the sound output device |
 | Shortcuts & API | The reader's shortcuts, global hotkeys that run effects, and an HTTP API for Stream Deck and the like |

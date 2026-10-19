@@ -1,6 +1,8 @@
 /* The OBS overlay. Transparent, sized by the browser source (1920 × 1080). */
 html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
-body { font: 600 36px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; }
+/* The overlay style from the app sets --font, --text, --accent, --shadow,
+   --box-bg, --radius and --scale on :root; these fallbacks are the defaults. */
+body { font: 600 calc(36px * var(--scale, 1))/1.2 var(--font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif); color: var(--text, #fff); }
 
 #stage {
   position: fixed;
@@ -24,24 +26,24 @@ body { font: 600 36px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-ser
 .alert { display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: min(1100px, 90vw); }
 .alert img, .alert video { max-width: 600px; max-height: 420px; object-fit: contain; }
 .alert-title {
-  font-size: var(--size, 36px);
+  font-size: var(--size, calc(36px * var(--scale, 1)));
   color: var(--text, #fff);
-  text-shadow: 0 2px 6px rgba(0, 0, 0, .8), 0 0 2px rgba(0, 0, 0, .9);
+  text-shadow: var(--shadow, 0 2px 6px rgba(0, 0, 0, .8), 0 0 2px rgba(0, 0, 0, .9));
   padding-bottom: 6px;
   border-bottom: 4px solid var(--accent, #a37bff);
 }
 .alert-message {
-  font-size: calc(var(--size, 36px) * .7);
+  font-size: calc(var(--size, calc(36px * var(--scale, 1))) * .7);
   font-weight: 500;
   color: var(--text, #fff);
-  text-shadow: 0 2px 6px rgba(0, 0, 0, .8);
+  text-shadow: var(--shadow, 0 2px 6px rgba(0, 0, 0, .8));
   max-width: 900px;
   overflow-wrap: anywhere;
 }
 .media img, .media video { display: block; max-width: 100%; }
-.text { white-space: pre-wrap; overflow-wrap: anywhere; text-shadow: 0 2px 6px rgba(0, 0, 0, .8), 0 0 2px rgba(0, 0, 0, .9); }
-.text[data-bg="dark"] { background: rgba(10, 8, 20, .78); padding: .3em .6em; border-radius: 12px; text-shadow: none; }
-.text[data-bg="light"] { background: rgba(255, 255, 255, .9); color: #111 !important; padding: .3em .6em; border-radius: 12px; text-shadow: none; }
+.text { font-size: calc(48px * var(--scale, 1)); color: var(--text, #fff); white-space: pre-wrap; overflow-wrap: anywhere; text-shadow: var(--shadow, 0 2px 6px rgba(0, 0, 0, .8), 0 0 2px rgba(0, 0, 0, .9)); }
+.text[data-bg="dark"] { background: var(--box-bg, rgba(10, 8, 20, .78)); padding: .3em .6em; border-radius: var(--radius, 12px); text-shadow: none; }
+.text[data-bg="light"] { background: rgba(255, 255, 255, .9); color: #111 !important; padding: .3em .6em; border-radius: var(--radius, 12px); text-shadow: none; }
 
 #counter {
   position: fixed;
@@ -49,7 +51,8 @@ body { font: 600 36px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-ser
   display: flex;
   align-items: center;
   justify-content: center;
-  text-shadow: 0 2px 6px rgba(0, 0, 0, .8);
+  font-size: calc(64px * var(--scale, 1));
+  text-shadow: var(--shadow, 0 2px 6px rgba(0, 0, 0, .8));
   white-space: nowrap;
 }
 #counter.bump { animation: bump .3s ease-out; }
@@ -66,15 +69,16 @@ body { font: 600 36px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-ser
   flex-direction: column;
   justify-content: flex-end;
   gap: 8px;
-  font-size: var(--chat-size, 26px);
+  font-size: var(--chat-size, calc(26px * var(--scale, 1)));
   font-weight: 500;
   overflow: hidden;
 }
 #chat li {
   padding: .35em .6em;
-  border-radius: 10px;
-  background: rgba(10, 8, 20, var(--chat-bg, .6));
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
+  border-radius: var(--radius, 10px);
+  /* &background= in the link wins over the overlay style's box colour. */
+  background: var(--chat-box, var(--box-bg, rgba(10, 8, 20, .6)));
+  text-shadow: var(--shadow, 0 1px 3px rgba(0, 0, 0, .9));
   overflow-wrap: anywhere;
   animation: in-slide-up .35s ease-out both;
 }

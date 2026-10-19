@@ -297,6 +297,7 @@ function buildMenu() {
       label: 'Settings',
       submenu: [
         { label: 'Open settings…', accelerator: 'CmdOrCtrl+,', click: () => sendAction('openSettings') },
+        { label: 'Setup guide…', click: () => { showWindow(); sendAction('bot:setup'); } },
         { type: 'separator' },
         { label: 'Save settings to a file…', accelerator: 'CmdOrCtrl+S', click: () => sendAction('exportSettings') },
         { label: 'Load settings from a file…', accelerator: 'CmdOrCtrl+O', click: () => sendAction('importSettings') },

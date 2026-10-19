@@ -76,7 +76,18 @@ const BOT_DEFAULTS = {
     length: { enabled: false, max: 400 },
     repeats: { enabled: false, count: 3, seconds: 30 },
   },
-  overlay: { enabled: true, port: 7473, apiKey: '' },
+  overlay: {
+    enabled: true,
+    port: 7473,
+    apiKey: '',
+    // How every overlay looks; an instance's style only holds what it changes.
+    style: { font: '', textColor: '#ffffff', accent: '#a37bff', shadow: 'soft', boxColor: '#0a0814', boxOpacity: 78, radius: 12, scale: 100 },
+    css: '',
+    instances: [],           // [{ id, name, style: {}, css: '' }]
+    // What the link builders on the Overlay tab were last set to.
+    chatLink: { instance: '', max: 12, fade: 0, size: '', background: '', badges: true, platforms: { twitch: true, youtube: true, tiktok: true } },
+    counterLink: { name: '', instance: '', label: '', size: '', color: '', font: '' },
+  },
   obs: { enabled: false, url: 'ws://127.0.0.1:4455', autoConnect: true },
   sound: { device: '', volume: 100 },
   // Multistream: the three chats joined up (relay.js).
@@ -103,6 +114,7 @@ const BOT_DEFAULTS = {
     tab: 'dashboard',
     feedActivity: true,      // follows, redemptions and the rest as lines in the chat list
     backupViewers: true,     // backups include the viewer list
+    setupDone: false,        // the setup guide was finished or closed (setup.js)
   },
 };
 
@@ -142,27 +154,61 @@ Bot.emit = (type, payload) => {
 // ---------------------------------------------------------------------------
 
 const saveTimers = {};
-function scheduleWrite(name, getText, delay) {
+const writers = {};
+function scheduleWrite(name, write, delay) {
   clearTimeout(saveTimers[name]);
+  writers[name] = write;
   saveTimers[name] = setTimeout(() => {
     delete saveTimers[name];
-    Bot.desktop.writeStore(name, getText());
+    write();
   }, delay);
 }
 
 Bot.save = () => {
-  scheduleWrite('bot-config', () => JSON.stringify(Bot.data), 400);
+  scheduleWrite('bot-config', () => Bot.desktop.writeStore('bot-config', JSON.stringify(Bot.data)), 400);
   Bot.emit('change');
 };
 
-// The viewer list can be big and changes with every message, so it's written less often.
-Bot.saveViewers = () => scheduleWrite('bot-viewers', () => JSON.stringify(Bot.viewers), 8000);
+// Each viewer is its own row in the database, so only the ones that changed
+// are sent. Called with no viewers, the whole list is written again (after an
+// import, a backup, or a change to everyone at once).
+const dirtyViewers = new Set();
+let allViewersDirty = false;
+
+function writeViewers() {
+  const users = Bot.viewers.users;
+  if (allViewersDirty) {
+    Bot.desktop.writeViewers({ replace: true, upsert: Object.entries(users).map(([key, v]) => [key, JSON.stringify(v)]) });
+  } else if (dirtyViewers.size) {
+    const upsert = [];
+    const remove = [];
+    for (const key of dirtyViewers) {
+      if (users[key]) upsert.push([key, JSON.stringify(users[key])]);
+      else remove.push(key);
+    }
+    Bot.desktop.writeViewers({ upsert, remove });
+  }
+  dirtyViewers.clear();
+  allViewersDirty = false;
+}
+
+// Takes viewers or their keys, or a list of them. Written every few seconds at most.
+Bot.saveViewers = (...changed) => {
+  if (!changed.length) allViewersDirty = true;
+  for (const v of changed.flat()) {
+    const key = typeof v === 'string' ? v : v && v.key;
+    if (key) dirtyViewers.add(key);
+    else allViewersDirty = true;
+  }
+  scheduleWrite('bot-viewers', writeViewers, 8000);
+};
 
 // A reload or quitting the app shouldn't lose the last few seconds.
 window.addEventListener('beforeunload', () => {
   for (const name of Object.keys(saveTimers)) {
     clearTimeout(saveTimers[name]);
-    Bot.desktop.writeStore(name, JSON.stringify(name === 'bot-config' ? Bot.data : Bot.viewers));
+    delete saveTimers[name];
+    writers[name]();
   }
 });
 

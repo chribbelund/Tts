@@ -10,10 +10,26 @@ Bot.applyOverlay = async () => {
   const o = Bot.data.overlay;
   Bot.overlayStatus = await Bot.desktop.configureOverlay({ enabled: o.enabled, port: o.port, apiKey: o.apiKey });
   if (Bot.overlayStatus.error) Bot.log('error', `Overlay: ${Bot.overlayStatus.error}`);
+  Bot.applyOverlayStyle();
   Bot.emit('overlay');
   // An overlay that reconnects gets the counters again from the server's memory.
   Bot.counters.publishAll();
   return Bot.overlayStatus;
+};
+
+// Sends the overlay style to the server, which passes it on to every open
+// overlay and to each one that connects later.
+let styleTimer = null;
+Bot.applyOverlayStyle = () => {
+  clearTimeout(styleTimer);
+  styleTimer = null;
+  const o = Bot.data.overlay;
+  Bot.desktop.setOverlayStyle({ style: o.style, css: o.css, instances: o.instances.map((i) => ({ name: i.name, style: i.style, css: i.css })) });
+};
+// For colour pickers and sliders, which change many times a second.
+Bot.applyOverlayStyleSoon = () => {
+  clearTimeout(styleTimer);
+  styleTimer = setTimeout(Bot.applyOverlayStyle, 150);
 };
 
 function hookIntoReader() {
@@ -43,7 +59,8 @@ function hookIntoReader() {
     try { Bot.chat.fromRemote(entry); } catch (err) { Bot.log('error', err.message); }
   };
 
-  host.onAction = (action) => Bot.hotkeys.run(action);
+  // The setup guide comes from the macOS Settings menu; the rest are hotkeys.
+  host.onAction = (action) => (action === 'bot:setup' ? Bot.setup.open() : Bot.hotkeys.run(action));
 
   // Backup & import saves the bot along with the reader, and loads it back.
   host.backupExtra = () => ({ setup: Bot.data, ...(Bot.data.ui.backupViewers !== false ? { viewers: Bot.viewers } : {}) });
@@ -111,5 +128,10 @@ function startTwitch() {
 
   Bot.ready = true;
   Bot.events.fire('appStarted');
+  // The first time, the setup guide. Someone already logged in (from before
+  // the guide existed) has done it.
+  if (!Bot.data.ui.setupDone) {
+    if (Bot.twitch.loggedIn()) { Bot.data.ui.setupDone = true; Bot.save(); } else Bot.setup.open();
+  }
   Bot.log('info', 'Bot started');
 })();

@@ -148,7 +148,7 @@
       UI.section('Chat on stream',
         UI.check(c, 'overlayChat', 'Show the three chats together in an overlay', { onChange: save }),
         h('p', { class: 'hint' }, 'Add it to OBS as another Browser source. For a vertical TikTok layout, make it narrow and tall. Options: &max= messages shown, &fade= seconds before one disappears, &size= text size in pixels, &badges=0 to hide the platform tags, &platforms=youtube,tiktok to show only some.'),
-        UI.row(h('code', { class: 'code-box' }, overlayUrl), UI.copyButton(() => overlayUrl))),
+        UI.row(h('code', { class: 'code-box' }, overlayUrl), UI.copyButton(() => overlayUrl), UI.button('Customize it', () => UI.open('overlay')))),
 
       UI.section('Try it',
         UI.row(UI.button('Send test messages', () => { R.test(); UI.say(testStatus, 'Sent one made-up message from each platform through the relay. Check your chats and the overlay.'); })),

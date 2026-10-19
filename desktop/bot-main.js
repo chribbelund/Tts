@@ -2,7 +2,7 @@
 
 // The main-process half of the bot (see docs/bot-plan.md). The bot itself runs
 // in the page, next to the reader; this file does what a page can't:
-//   - keeps the bot's files (setup, viewer database) under the user data folder
+//   - keeps the bot's setup and viewer database in SQLite under the user data folder (db-main.js)
 //   - keeps the Twitch tokens encrypted with the OS keychain (safeStorage)
 //   - serves the OBS overlay and the HTTP API on 127.0.0.1
 //   - makes HTTP requests without CORS, and writes text files for OBS
@@ -13,6 +13,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const db = require('./db-main');
 
 const OVERLAY_DIR = path.join(__dirname, 'overlay');
 const DEFAULT_PORT = 7473;
@@ -45,27 +46,18 @@ function botDir() {
   return dir;
 }
 
-// Written next to the target and renamed over it, so a crash mid-write
-// leaves the old file rather than half a new one.
-function writeAtomic(file, text) {
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, text, 'utf8');
-  fs.renameSync(tmp, file);
-}
-
-function readJson(file, fallback) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
+// Opened on first use, which is after app ready (userData is known by then).
+function store() {
+  db.open(botDir());
+  return db;
 }
 
 // ---------------------------------------------------------------------------
 // Secrets: the Twitch tokens and the OBS password
 // ---------------------------------------------------------------------------
 
-const secretsFile = () => path.join(botDir(), 'secrets.json');
-
 function getSecret(name) {
-  const all = readJson(secretsFile(), {});
-  const item = all[name];
+  const item = store().getSecretRow(name);
   if (!item) return null;
   try {
     if (item.enc) return safeStorage.decryptString(Buffer.from(item.value, 'base64'));
@@ -76,16 +68,14 @@ function getSecret(name) {
 }
 
 function setSecret(name, value) {
-  const all = readJson(secretsFile(), {});
   if (value === null || value === undefined || value === '') {
-    delete all[name];
+    store().setSecretRow(name, null);
   } else if (safeStorage.isEncryptionAvailable()) {
-    all[name] = { enc: true, value: safeStorage.encryptString(String(value)).toString('base64') };
+    store().setSecretRow(name, { enc: true, value: safeStorage.encryptString(String(value)).toString('base64') });
   } else {
     // Linux without a keyring: there is nothing to encrypt with.
-    all[name] = { enc: false, value: String(value) };
+    store().setSecretRow(name, { enc: false, value: String(value) });
   }
-  writeAtomic(secretsFile(), JSON.stringify(all));
   return true;
 }
 
@@ -93,13 +83,8 @@ function setSecret(name, value) {
 // Files the page may write to: only ones the streamer picked in a save dialog
 // ---------------------------------------------------------------------------
 
-const grantedFile = () => path.join(botDir(), 'granted.json');
-const grantedPaths = () => new Set(readJson(grantedFile(), []));
-
 function grantPath(file) {
-  const all = grantedPaths();
-  all.add(path.resolve(file));
-  writeAtomic(grantedFile(), JSON.stringify([...all].slice(-200)));
+  store().grant(path.resolve(file));
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +101,7 @@ const overlay = {
   mediaIds: new Map(),     // absolute path -> id
   counters: new Map(),     // name -> last counter event, replayed to new overlays
   catalog: [],             // effect lists the API can run: [{ id, name }]
+  styles: { style: {}, css: '', instances: new Map() },  // instance name -> { style, css }
   secret: crypto.randomBytes(16).toString('hex'),
   heartbeat: null,
 };
@@ -127,7 +113,8 @@ function overlayStatus() {
     running: !!(overlay.server && overlay.server.listening),
     port: overlay.port,
     url: `http://127.0.0.1:${overlay.port}/`,
-    clients: overlay.clients.size,
+    // The previews on the Overlay tab aren't counted.
+    clients: [...overlay.clients].filter((c) => !c.preview).length,
     error: overlay.error,
   };
 }
@@ -173,6 +160,40 @@ function broadcast(event) {
   }
 }
 
+// The look an overlay gets: the shared style with its instance's changes on top.
+function styleEvent(instance) {
+  const own = (instance && overlay.styles.instances.get(instance.toLowerCase())) || { style: {}, css: '' };
+  return {
+    type: 'style',
+    theme: { ...overlay.styles.style, ...own.style },
+    css: [overlay.styles.css, own.css].filter(Boolean).join('\n'),
+  };
+}
+
+const MAX_CSS = 50 * 1024;
+
+function cleanStyle(value) {
+  const out = {};
+  if (!value || typeof value !== 'object') return out;
+  for (const [key, v] of Object.entries(value)) {
+    if (!/^\w{1,30}$/.test(key)) continue;
+    if (typeof v === 'number' && Number.isFinite(v)) out[key] = v;
+    else if (typeof v === 'string' && v !== '') out[key] = v.slice(0, 200);
+  }
+  return out;
+}
+
+function setStyles(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  const instances = new Map();
+  for (const item of Array.isArray(payload.instances) ? payload.instances.slice(0, 100) : []) {
+    if (!item || typeof item.name !== 'string' || !item.name.trim()) continue;
+    instances.set(item.name.trim().slice(0, 40).toLowerCase(), { style: cleanStyle(item.style), css: String(item.css || '').slice(0, MAX_CSS) });
+  }
+  overlay.styles = { style: cleanStyle(payload.style), css: String(payload.css || '').slice(0, MAX_CSS), instances };
+  for (const client of overlay.clients) client.res.write(`data: ${JSON.stringify(styleEvent(client.instance))}\n\n`);
+}
+
 function sendFile(req, res, file, type) {
   fs.stat(file, (err, stat) => {
     if (err || !stat.isFile()) { res.writeHead(404); res.end(); return; }
@@ -206,11 +227,12 @@ function handleRequest(req, res) {
   if (url.pathname === '/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
     res.write('retry: 2000\n\n');
-    const client = { res, instance: (url.searchParams.get('instance') || '').slice(0, 40) };
+    const client = { res, instance: (url.searchParams.get('instance') || '').slice(0, 40), preview: url.searchParams.has('preview') };
     overlay.clients.add(client);
+    res.write(`data: ${JSON.stringify(styleEvent(client.instance))}\n\n`);
     for (const counter of overlay.counters.values()) res.write(`data: ${JSON.stringify(counter)}\n\n`);
-    req.on('close', () => { overlay.clients.delete(client); notifyPage('overlay', overlayStatus()); });
-    notifyPage('overlay', overlayStatus());
+    req.on('close', () => { overlay.clients.delete(client); if (!client.preview) notifyPage('overlay', overlayStatus()); });
+    if (!client.preview) notifyPage('overlay', overlayStatus());
     return;
   }
 
@@ -289,12 +311,26 @@ function setup(options) {
 
   ipcMain.handle('bot:store-read', (_event, name) => {
     if (!STORE_NAME_RE.test(String(name))) return null;
-    try { return fs.readFileSync(path.join(botDir(), `${name}.json`), 'utf8'); } catch { return null; }
+    try { return store().readStore(name); } catch (err) { console.error('bot store:', err.message); return null; }
   });
 
   ipcMain.on('bot:store-write', (_event, name, text) => {
     if (!STORE_NAME_RE.test(String(name)) || typeof text !== 'string' || text.length > MAX_STORE_BYTES) return;
-    try { writeAtomic(path.join(botDir(), `${name}.json`), text); } catch (err) { console.error('bot store:', err.message); }
+    try { store().writeStore(name, text); } catch (err) { console.error('bot store:', err.message); }
+  });
+
+  // Only the viewers that changed since the last save: { upsert: [[key, json]], remove: [key], replace }.
+  ipcMain.on('bot:viewers-write', (_event, changes) => {
+    if (!changes || typeof changes !== 'object') return;
+    const upsert = Array.isArray(changes.upsert) ? changes.upsert : [];
+    const remove = Array.isArray(changes.remove) ? changes.remove : [];
+    let bytes = 0;
+    for (const row of upsert) {
+      if (!Array.isArray(row) || typeof row[0] !== 'string' || typeof row[1] !== 'string') return;
+      bytes += row[0].length + row[1].length;
+    }
+    if (bytes > MAX_STORE_BYTES || !remove.every((k) => typeof k === 'string')) return;
+    try { store().writeViewers({ upsert, remove, replace: changes.replace === true }); } catch (err) { console.error('bot viewers:', err.message); }
   });
 
   ipcMain.handle('bot:secret-get', (_event, name) => (/^[\w-]{1,40}$/.test(String(name)) ? getSecret(name) : null));
@@ -335,7 +371,7 @@ function setup(options) {
     const abs = path.resolve(String(file || ''));
     // Only files the streamer picked in a save dialog: a text file for OBS,
     // or where a backup of the setup goes.
-    if (!grantedPaths().has(abs)) {
+    if (!store().isGranted(abs)) {
       return { error: 'Pick the file again with “Choose…”, so the app may write to it' };
     }
     try {
@@ -385,6 +421,7 @@ function setup(options) {
 
   ipcMain.handle('overlay:status', () => overlayStatus());
   ipcMain.on('overlay:send', (_event, payload) => { if (payload && typeof payload === 'object') broadcast(payload); });
+  ipcMain.on('overlay:style', (_event, payload) => setStyles(payload));
   ipcMain.on('overlay:catalog', (_event, list) => {
     overlay.catalog = Array.isArray(list)
       ? list.filter((l) => l && typeof l.id === 'string' && typeof l.name === 'string').slice(0, 500).map((l) => ({ id: l.id, name: l.name }))
@@ -392,7 +429,7 @@ function setup(options) {
   });
   ipcMain.on('overlay:open', () => shell.openExternal(overlayStatus().url));
 
-  app.on('will-quit', () => { clearInterval(overlay.heartbeat); stopServer(); });
+  app.on('will-quit', () => { clearInterval(overlay.heartbeat); stopServer(); db.close(); });
 }
 
 module.exports = { setup };

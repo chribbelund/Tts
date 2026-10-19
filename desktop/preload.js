@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
     base: argValue('bot-base'),
     readStore: (name) => ipcRenderer.invoke('bot:store-read', name),
     writeStore: (name, text) => ipcRenderer.send('bot:store-write', name, text),
+    writeViewers: (changes) => ipcRenderer.send('bot:viewers-write', changes),
     getSecret: (name) => ipcRenderer.invoke('bot:secret-get', name),
     setSecret: (name, value) => ipcRenderer.invoke('bot:secret-set', name, value),
     secureStorage: () => ipcRenderer.invoke('bot:secure-storage'),
@@ -62,6 +63,7 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
     configureOverlay: (options) => ipcRenderer.invoke('overlay:configure', options),
     overlayStatus: () => ipcRenderer.invoke('overlay:status'),
     sendOverlay: (event) => ipcRenderer.send('overlay:send', event),
+    setOverlayStyle: (styles) => ipcRenderer.send('overlay:style', styles),
     setCatalog: (lists) => ipcRenderer.send('overlay:catalog', lists),
     openOverlay: () => ipcRenderer.send('overlay:open'),
     // Multistream: signing in to YouTube, posting to TikTok.

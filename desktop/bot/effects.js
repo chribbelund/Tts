@@ -186,6 +186,11 @@ const POSITIONS = [
 ];
 const ENTER = [['fade', 'Fade in'], ['slide-up', 'Slide up'], ['slide-down', 'Slide down'], ['slide-left', 'Slide in from the right'], ['slide-right', 'Slide in from the left'], ['zoom', 'Zoom'], ['bounce', 'Bounce'], ['none', 'Just appear']];
 const EXIT = [['fade', 'Fade out'], ['slide-up', 'Slide up'], ['slide-down', 'Slide down'], ['zoom', 'Zoom out'], ['none', 'Just disappear']];
+// Alerts and text follow the overlay style unless set to their own look.
+// Effects saved before there was a choice keep the colours they were given.
+const lookOf = (e) => e.look || 'custom';
+const custom = (e) => lookOf(e) === 'custom';
+const lookField = { key: 'look', label: 'Look', type: 'select', options: [['overlay', 'Overlay style (set on the Overlay tab)'], ['custom', 'Its own colours and size']], default: 'overlay' };
 const instanceField = { key: 'instance', label: 'Overlay instance', type: 'text', placeholder: 'empty = every overlay', default: '', advanced: true };
 const waitField = (label = 'Wait until it’s over before the next effect') => ({ key: 'wait', label, type: 'checkbox', default: false });
 const userField = (label = 'User', def = '$username') => ({ key: 'username', label, type: 'text', default: def, vars: true });
@@ -341,9 +346,10 @@ type('alert', {
     { key: 'position', label: 'Position', type: 'select', options: POSITIONS, default: 'top' },
     { key: 'enter', label: 'Coming in', type: 'select', options: ENTER, default: 'bounce' },
     { key: 'exit', label: 'Going out', type: 'select', options: EXIT, default: 'fade' },
-    { key: 'color', label: 'Highlight colour', type: 'color', default: '#a37bff', advanced: true },
-    { key: 'textColor', label: 'Text colour', type: 'color', default: '#ffffff', advanced: true },
-    { key: 'fontSize', label: 'Text size (px)', type: 'number', min: 10, max: 200, default: 36, advanced: true },
+    lookField,
+    { key: 'color', label: 'Highlight colour', type: 'color', default: '#a37bff', showIf: custom },
+    { key: 'textColor', label: 'Text colour', type: 'color', default: '#ffffff', showIf: custom },
+    { key: 'fontSize', label: 'Text size (px)', type: 'number', min: 10, max: 200, default: 36, showIf: custom },
     { key: 'speak', label: 'Also read the message out loud with TTS', type: 'checkbox', default: false },
     waitField('Wait until it has gone'),
     instanceField,
@@ -354,7 +360,8 @@ type('alert', {
     const seconds = Math.max(1, Number(e.duration) || 6);
     const event = {
       type: 'alert', id: Bot.uid('o'), title, message, file: e.file, soundFile: e.soundFile, volume: e.volume,
-      duration: seconds, position: e.position, enter: e.enter, exit: e.exit, color: e.color, textColor: e.textColor, fontSize: e.fontSize, instance: e.instance,
+      duration: seconds, position: e.position, enter: e.enter, exit: e.exit, instance: e.instance,
+      ...(custom(e) ? { color: e.color, textColor: e.textColor, fontSize: e.fontSize } : {}),
     };
     const shown = Bot.overlay.queue(e.instance, seconds * 1000, event);
     if (e.speak && message.trim()) Bot.host.speak(message, { priority: true });
@@ -399,8 +406,9 @@ type('text', {
     { key: 'text', label: 'Text', type: 'textarea', vars: true, default: '' },
     { key: 'duration', label: 'Show for (seconds)', type: 'number', min: 1, max: 3600, default: 5 },
     { key: 'position', label: 'Position', type: 'select', options: POSITIONS, default: 'center' },
-    { key: 'fontSize', label: 'Text size (px)', type: 'number', min: 8, max: 300, default: 48 },
-    { key: 'color', label: 'Text colour', type: 'color', default: '#ffffff' },
+    lookField,
+    { key: 'fontSize', label: 'Text size (px)', type: 'number', min: 8, max: 300, default: 48, showIf: custom },
+    { key: 'color', label: 'Text colour', type: 'color', default: '#ffffff', showIf: custom },
     { key: 'background', label: 'Background', type: 'select', options: [['none', 'None, with a shadow'], ['dark', 'Dark box'], ['light', 'Light box']], default: 'none' },
     { key: 'enter', label: 'Coming in', type: 'select', options: ENTER, default: 'fade' },
     { key: 'exit', label: 'Going out', type: 'select', options: EXIT, default: 'fade' },
@@ -411,7 +419,10 @@ type('text', {
   async run(e, ctx) {
     const text = await render(e.text, ctx);
     const seconds = Math.max(1, Number(e.duration) || 5);
-    Bot.overlay.send({ type: 'text', id: Bot.uid('o'), text, duration: seconds, position: e.position, fontSize: e.fontSize, color: e.color, background: e.background, enter: e.enter, exit: e.exit, instance: e.instance });
+    Bot.overlay.send({
+      type: 'text', id: Bot.uid('o'), text, duration: seconds, position: e.position, background: e.background, enter: e.enter, exit: e.exit, instance: e.instance,
+      ...(custom(e) ? { fontSize: e.fontSize, color: e.color } : {}),
+    });
     if (e.wait) await Bot.wait(seconds * 1000 + 400);
   },
 });
@@ -558,7 +569,7 @@ type('currency', {
     } else {
       const list = e.who === 'watching' ? Bot.viewersDb.watching() : Object.values(Bot.viewers.users);
       for (const v of list) Bot.viewersDb.applyCurrency(v, e.action, amount);
-      Bot.saveViewers();
+      if (list.length) Bot.saveViewers(list);
       Bot.emit('viewers');
     }
   },

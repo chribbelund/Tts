@@ -83,6 +83,13 @@ UI.select = (obj, key, options, { onChange = null, label = null } = {}) => {
   return node;
 };
 
+UI.color = (obj, key, { onChange = null, fallback = '#ffffff' } = {}) => {
+  const node = h('input', { type: 'color' });
+  node.value = obj[key] || fallback;
+  node.addEventListener('input', () => { obj[key] = node.value; if (onChange) onChange(node.value); });
+  return node;
+};
+
 UI.check = (obj, key, label, { onChange = null } = {}) => {
   const box = h('input', { type: 'checkbox' });
   box.checked = !!obj[key];
@@ -303,12 +310,7 @@ function effectControl(effect, f, changed, rerender, fields) {
     case 'number': return UI.number(effect, f.key, { min: f.min ?? null, max: f.max ?? null, onChange });
     case 'range': return UI.range(effect, f.key, { min: f.min, max: f.max, onChange });
     case 'select': return UI.select(effect, f.key, f.options, { onChange: () => { changed(); rerender(f.key); } });
-    case 'color': {
-      const c = h('input', { type: 'color' });
-      c.value = effect[f.key] || '#ffffff';
-      c.addEventListener('input', () => { effect[f.key] = c.value; changed(); });
-      return c;
-    }
+    case 'color': return UI.color(effect, f.key, { onChange: changed });
     case 'file': return UI.file(effect, f.key, { kind: f.kind, onChange });
     case 'savefile': return UI.file(effect, f.key, { kind: f.kind, save: true, defaultName: 'chat-reader.txt', onChange });
     case 'voice': return UI.select(effect, f.key, [['', 'The reader’s own voice'], ...Bot.host.voices().map((v) => [v.name, `${v.name}${v.inPool ? '' : ' (not in the pool)'}`])], { onChange });

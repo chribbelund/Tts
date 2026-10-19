@@ -13,6 +13,21 @@ const chatMode = params.has('chat');
 const chatOnly = (params.get('platforms') || '').toLowerCase().split(',').filter(Boolean);
 
 const EXIT_MS = 520;
+const COLOR_RE = /^#[0-9a-f]{3,8}$/i;
+
+const SHADOWS = {
+  none: 'none',
+  soft: '0 2px 6px rgba(0, 0, 0, .8), 0 0 2px rgba(0, 0, 0, .9)',
+  strong: '0 3px 12px rgba(0, 0, 0, 1), 0 0 4px rgba(0, 0, 0, 1)',
+  outline: '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0 2px 6px rgba(0, 0, 0, .6)',
+};
+
+function rgba(hex, opacity) {
+  let h = hex.slice(1);
+  if (h.length <= 4) h = [...h].map((c) => c + c).join('');
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(100, opacity)) / 100})`;
+}
 
 function container(position) {
   return document.querySelector(`.pos[data-pos="${position}"]`) || document.querySelector('.pos[data-pos="center"]');
@@ -66,9 +81,10 @@ function playSound(src, volume = 80) {
 const handlers = {
   alert(e) {
     const box = el('div', 'item alert');
-    box.style.setProperty('--accent', e.color || '#a37bff');
-    box.style.setProperty('--text', e.textColor || '#ffffff');
-    box.style.setProperty('--size', `${Number(e.fontSize) || 36}px`);
+    // Without its own colours and size, an alert follows the overlay style.
+    if (e.color) box.style.setProperty('--accent', e.color);
+    if (e.textColor) box.style.setProperty('--text', e.textColor);
+    if (Number(e.fontSize)) box.style.setProperty('--size', `${Number(e.fontSize)}px`);
     if (e.src) box.append(mediaElement(e.src, { volume: e.volume, loop: true }));
     if (e.title) box.append(el('div', 'alert-title', e.title));
     if (e.message) box.append(el('div', 'alert-message', e.message));
@@ -91,10 +107,32 @@ const handlers = {
 
   text(e) {
     const box = el('div', 'item text', e.text || '');
-    box.style.fontSize = `${Number(e.fontSize) || 48}px`;
-    box.style.color = e.color || '#fff';
+    if (Number(e.fontSize)) box.style.fontSize = `${Number(e.fontSize)}px`;
+    if (e.color) box.style.color = e.color;
     box.dataset.bg = e.background || 'none';
     show(box, { position: e.position, enter: e.enter, exit: e.exit, seconds: Number(e.duration) || 5 });
+  },
+
+  // The look set on the Overlay tab, for every kind of overlay.
+  style(e) {
+    const t = e.theme || {};
+    const root = document.documentElement.style;
+    const set = (name, value) => (value ? root.setProperty(name, value) : root.removeProperty(name));
+    const font = String(t.font || '').replace(/[;{}<>]/g, '').trim();
+    set('--font', font ? `${font}, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif` : '');
+    set('--text', COLOR_RE.test(t.textColor) ? t.textColor : '');
+    set('--accent', COLOR_RE.test(t.accent) ? t.accent : '');
+    set('--shadow', SHADOWS[t.shadow] || '');
+    set('--box-bg', COLOR_RE.test(t.boxColor) ? rgba(t.boxColor, Number(t.boxOpacity ?? 78)) : '');
+    set('--radius', Number.isFinite(Number(t.radius)) && t.radius !== '' ? `${Math.max(0, Number(t.radius))}px` : '');
+    set('--scale', Number(t.scale) > 0 ? String(Number(t.scale) / 100) : '');
+    let custom = document.getElementById('custom-css');
+    if (!custom) {
+      custom = el('style');
+      custom.id = 'custom-css';
+      document.head.append(custom);
+    }
+    custom.textContent = String(e.css || '');
   },
 
   sound(e) { playSound(e.soundSrc || e.src, e.volume); },
@@ -139,9 +177,10 @@ if (counterName) {
   const box = document.getElementById('counter');
   box.hidden = false;
   document.getElementById('stage').hidden = true;
-  box.style.fontSize = `${Number(params.get('size')) || 64}px`;
-  const color = params.get('color') || 'ffffff';
-  box.style.color = /^[0-9a-f]{3,8}$/i.test(color) ? `#${color}` : color;
+  // Anything not in the link comes from the overlay style.
+  if (Number(params.get('size'))) box.style.fontSize = `${Number(params.get('size'))}px`;
+  const color = params.get('color') || '';
+  if (color) box.style.color = /^[0-9a-f]{3,8}$/i.test(color) ? `#${color}` : color;
   if (params.get('font')) box.style.fontFamily = params.get('font');
 }
 
@@ -149,15 +188,18 @@ if (chatMode) {
   const list = document.getElementById('chat');
   list.hidden = false;
   document.getElementById('stage').hidden = true;
-  list.style.setProperty('--chat-size', `${Number(params.get('size')) || 26}px`);
-  if (params.has('background')) list.style.setProperty('--chat-bg', String(Math.max(0, Math.min(1, Number(params.get('background')) || 0))));
+  if (Number(params.get('size'))) list.style.setProperty('--chat-size', `${Number(params.get('size'))}px`);
+  if (params.has('background')) list.style.setProperty('--chat-box', `rgba(10, 8, 20, ${Math.max(0, Math.min(1, Number(params.get('background')) || 0))})`);
 }
 
-const source = new EventSource(`/events${instance ? `?instance=${encodeURIComponent(instance)}` : ''}`);
+const query = new URLSearchParams();
+if (instance) query.set('instance', instance);
+if (params.has('preview')) query.set('preview', '1');  // the app's own previews
+const source = new EventSource(`/events${query.toString() ? `?${query}` : ''}`);
 source.onmessage = (msg) => {
   let event;
   try { event = JSON.parse(msg.data); } catch { return; }
   const handler = handlers[event.type];
-  const wanted = counterName ? event.type === 'counter' : chatMode ? event.type === 'chat' : event.type !== 'counter' && event.type !== 'chat';
+  const wanted = event.type === 'style' || (counterName ? event.type === 'counter' : chatMode ? event.type === 'chat' : event.type !== 'counter' && event.type !== 'chat');
   if (handler && wanted) handler(event);
 };

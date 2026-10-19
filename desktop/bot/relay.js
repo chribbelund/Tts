@@ -436,6 +436,15 @@ Relay.start = () => {
   setInterval(Relay.sync, 15000);
 };
 
+// Made-up messages for the overlay only, from the chat link builder on the
+// Overlay tab: nothing is posted anywhere.
+Relay.testOverlay = () => {
+  const lines = [['twitch', 'Pixel_Panda', 'this overlay looks great'], ['youtube', 'LofiListener', 'hello from YouTube!'], ['tiktok', 'DanceQueen', 'hi everyone 👋']];
+  for (const [platform, user, text] of lines) {
+    Bot.overlay.send({ type: 'chat', id: `test-${platform}-${Date.now()}`, platform, label: cfg().labels[platform] || PLATFORMS[platform].name, user, color: '', text });
+  }
+};
+
 // A test, from the Multistream tab: one made-up message from each platform.
 Relay.test = () => {
   const make = (platform, name) => ({ platform, id: `test-${platform}-${Date.now()}`, ours: true, user: { id: name, login: name.toLowerCase(), displayName: name, platform, role: 0 }, text: `testing the relay from ${PLATFORMS[platform].name}` });
