@@ -308,7 +308,7 @@ function notifyPage(type, payload) {
 // tokens; the refresh token goes in the secrets like Twitch's.
 // ---------------------------------------------------------------------------
 
-const SPOTIFY_SCOPES = 'user-read-playback-state user-modify-playback-state user-read-currently-playing';
+const SPOTIFY_SCOPES = 'user-read-playback-state user-modify-playback-state user-read-currently-playing user-read-private';
 let spotifyLogin = null;   // { state, verifier, clientId, redirectUri, resolve, timer }
 
 const b64url = (buf) => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
