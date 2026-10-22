@@ -165,6 +165,10 @@ const BOT_DEFAULTS = {
     feedActivity: true,      // follows, redemptions and the rest as lines in the chat list
     backupViewers: true,     // backups include the viewer list
     setupDone: false,        // the setup guide was finished or closed (setup.js)
+    // The bot and stream tools (beta). Off by default, so the app starts as a
+    // plain chat reader; null until decided (start.js turns it on for anyone
+    // who already used the bot before this switch existed).
+    botEnabled: null,
   },
 };
 
@@ -183,6 +187,11 @@ function mergeDefaults(defaults, saved) {
   for (const [key, value] of Object.entries(saved)) if (!(key in out)) out[key] = value;
   return out;
 }
+
+// Whether the bot and stream tools are on. Off, the app is the chat reader
+// (and the screen reader) only: none of the bot's pages show and none of its
+// parts run. Turned on and off with Bot.setEnabled (start.js).
+Bot.enabled = () => !!(Bot.data && Bot.data.ui.botEnabled === true);
 
 Bot.uid = (prefix = 'x') => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 Bot.clone = (v) => JSON.parse(JSON.stringify(v));

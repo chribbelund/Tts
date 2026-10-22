@@ -59,6 +59,8 @@ const EVENT_TYPES = {
 const EventsApi = Bot.events = { types: EVENT_TYPES };
 
 EventsApi.fire = async (type, { user = null, fields = {}, raw = null, message = null, simulated = false } = {}) => {
+  // Nothing of the bot's runs while it's switched off.
+  if (!Bot.enabled()) return;
   const spec = EVENT_TYPES[type];
   if (!spec) return;
   if (user && user.platform === 'twitch' && user.id) Bot.viewersDb.noteEvent(user, type, fields);
@@ -143,6 +145,7 @@ ChatApi.fromEventSub = (e) => {
 ChatApi.seenRemote = new Set();
 
 ChatApi.fromRemote = (entry) => {
+  if (!Bot.enabled()) return;
   const platform = entry.platform;
   // The reader and the multistream relay can both read the same chat.
   if (entry.id) {
@@ -171,6 +174,7 @@ ChatApi.fromRemote = (entry) => {
 };
 
 ChatApi.handle = async (msg) => {
+  if (!Bot.enabled()) return;
   // The bot's own replies never trigger anything, or it could answer itself forever.
   const botAccount = Bot.twitch.accounts.bot;
   if (msg.platform === 'twitch' && botAccount && msg.user.id === botAccount.id) return;
@@ -507,6 +511,11 @@ TimersApi.chatLine = () => {
 TimersApi.start = () => {
   clearInterval(TimersApi.tick);
   TimersApi.tick = setInterval(TimersApi.check, 10000);
+};
+
+TimersApi.stop = () => {
+  clearInterval(TimersApi.tick);
+  TimersApi.tick = null;
 };
 
 TimersApi.check = () => {

@@ -1,17 +1,27 @@
 'use strict';
 
-// The setup guide: a step-by-step dialog the first time the app opens, which
-// walks through the Twitch application, logging in, the chats to read, the
-// voice, the overlay and OBS, the shortcuts and a few starter alerts. Every
-// step can be skipped; each one only uses what the sections themselves use,
-// so anything done here can be changed there later. It can be run again from
-// App → Accounts, and on macOS from the Settings menu.
+// The setup guide: a step-by-step dialog the first time the app opens. It
+// starts with the reader: how the app looks, which chats to read, the voice,
+// its speed, what gets read and what viewers may change, and the shortcuts.
+// Then the bot and stream tools (beta), which are off unless turned on here
+// or under App → Bot tools; only with them on does it go on to the Twitch
+// application, logging in, OBS and a few starter alerts.
+//
+// Every step can be skipped. The reader's steps work the real controls of
+// the reader's settings pages, so anything done here can be changed there
+// later, and the bot's steps use what its sections use. It can be run again
+// from App → Setup guide, and on macOS from the Settings menu.
+//
+// Many people who use the app can't see the screen well, so: each step
+// starts with keyboard focus on its heading (which says which step it is),
+// results are said by screen readers, and nothing needs a mouse.
 
 (() => {
   const h = UI.h;
   const save = () => Bot.save();
   const external = (url) => window.chatReaderDesktop.openExternal(url);
   const host = Bot.host;
+  const say = (text) => Bot.shell.say(text);
 
   const Setup = Bot.setup = { open: null, isOpen: () => dialog.open };
 
@@ -20,7 +30,7 @@
     chatTwitch: true, chatTwitchName: '', chatYoutube: '', chatTiktok: '', chatsNote: '',
     obsPassword: '', obsNote: '',
     starter: { alerts: true, raidThanks: true, followSpeak: false, points: false }, starterNote: '',
-    alertNote: '',
+    alertNote: '', sampleNote: '',
   };
   let index = 0;
   let voiceTimer = null;
@@ -45,6 +55,88 @@
     type: 'button', class: 'setup-choice', 'aria-pressed': String(selected), onclick,
   }, h('strong', {}, title), h('span', { class: 'hint' }, text));
 
+  // A copy of one of the reader's own controls (by its id in index.html).
+  // It shows the reader's current value, and a change goes to the reader's
+  // control, which saves and applies it as if it had been changed there.
+  function mirror(id, label, hint = '') {
+    const real = document.getElementById(id);
+    if (!real) return null;
+    const send = (value) => {
+      if (real.type === 'checkbox') real.checked = value;
+      else real.value = value;
+      real.dispatchEvent(new Event('input', { bubbles: true }));
+      real.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const hintEl = hint ? h('p', { class: 'hint' }, hint) : null;
+
+    if (real.type === 'checkbox') {
+      const box = h('input', { type: 'checkbox', id: `setup-${id}` });
+      box.checked = real.checked;
+      box.addEventListener('change', () => send(box.checked));
+      if (hintEl) { hintEl.id = `${id}-setup-hint`; box.setAttribute('aria-describedby', hintEl.id); }
+      return h('div', { class: 'setup-control' }, h('label', { class: 'check' }, box, h('span', {}, label)), hintEl);
+    }
+
+    let control;
+    if (real.tagName === 'SELECT') {
+      control = h('select');
+      for (const child of real.children) control.append(child.cloneNode(true));
+      control.value = real.value;
+      control.addEventListener('change', () => send(control.value));
+    } else if (real.tagName === 'TEXTAREA') {
+      control = h('textarea', { rows: 2, spellcheck: 'false', placeholder: real.placeholder });
+      control.value = real.value;
+      control.addEventListener('change', () => send(control.value));
+    } else if (real.type === 'range') {
+      // The reader's own label for the value ("80%", "1.25×"), so a screen
+      // reader says that rather than a bare number.
+      const outText = () => (document.querySelector(`output[for="${id}"]`) || {}).textContent || real.value;
+      const input = h('input', { type: 'range', min: real.min, max: real.max, step: real.step });
+      input.value = real.value;
+      const out = h('output', { 'aria-hidden': 'true' }, outText());
+      input.setAttribute('aria-valuetext', outText());
+      input.addEventListener('input', () => {
+        send(input.value);
+        out.textContent = outText();
+        input.setAttribute('aria-valuetext', out.textContent);
+      });
+      control = h('div', { class: 'bot-range' }, input, out);
+    } else {
+      control = h('input', { type: real.type || 'text', min: real.min || null, max: real.max || null, step: real.step || null, spellcheck: 'false', autocomplete: 'off' });
+      control.value = real.value;
+      // The reader may tidy the value up (a number kept in range); show what it kept.
+      control.addEventListener('change', () => { send(control.value); control.value = real.value; });
+    }
+    (control.matches('input, select, textarea') ? control : control.querySelector('input')).id = `setup-${id}`;
+    const field = UI.field(label, control);
+    if (hintEl) {
+      field.append(hintEl);
+      const target = control.matches('input, select, textarea') ? control : control.querySelector('input');
+      hintEl.id = `${id}-setup-hint`;
+      target.setAttribute('aria-describedby', hintEl.id);
+    }
+    return field;
+  }
+
+  // Says something in the reader's voice, now. A paused reader would keep
+  // it waiting, so say so instead.
+  function sampleButton(text, label = '▶ Hear a sample') {
+    return UI.button(label, () => {
+      if (host.state().paused) {
+        S.sampleNote = 'Reading is paused, so the sample waits until you resume it with the Pause button or your pause shortcut.';
+      } else {
+        S.sampleNote = '';
+        host.speak(text, { priority: true, label: 'Setup' });
+      }
+      say(S.sampleNote);
+      redraw();
+    }, { cls: 'btn small primary' });
+  }
+  const sampleNote = () => (S.sampleNote ? h('p', { class: 'hint', role: 'status' }, S.sampleNote) : null);
+
+  // The steps there are now: the bot's only while it's switched on.
+  const steps = () => STEPS.filter((s) => !s.bot || Bot.enabled());
+
   // -------------------------------------------------------------------------
   // The steps
   // -------------------------------------------------------------------------
@@ -55,22 +147,211 @@
       label: 'Welcome',
       title: 'Welcome to Chat Reader',
       render: () => [
-        UI.lead('Chat Reader reads your chat out loud and runs a Twitch bot: alerts, commands, timers, points and an overlay for OBS. This guide sets up the parts you need, one step at a time. It takes about five minutes.'),
+        UI.lead('Chat Reader reads your stream’s chat out loud, so you can follow it without looking at the screen. This guide sets it up one step at a time: how it looks, which chats to read, the voice, and the shortcuts. It takes about five minutes.'),
         h('ol', { class: 'bot-steps setup-overview' },
-          h('li', {}, h('strong', {}, 'Your Twitch application'), ': a free app on dev.twitch.tv the bot logs in through'),
-          h('li', {}, h('strong', {}, 'Log in to Twitch'), ', and optionally a separate bot account'),
-          h('li', {}, h('strong', {}, 'Chats to read'), ': your channel, and YouTube or TikTok if you stream there too'),
-          h('li', {}, h('strong', {}, 'A voice'), ' for the reader'),
-          h('li', {}, h('strong', {}, 'OBS'), ': the overlay for alerts, and remote control of scenes'),
-          h('li', {}, h('strong', {}, 'Shortcuts'), ' that work while you’re in a game'),
-          h('li', {}, h('strong', {}, 'A head start'), ': alerts and chat replies to begin with')),
-        h('p', { class: 'hint' }, 'Every step can be skipped. You can run this guide again any time from App → Accounts.'),
+          steps().filter((s) => s.id !== 'welcome' && s.overview).map((s) => h('li', {}, h('strong', {}, s.label), `: ${s.overview}`))),
+        UI.section('Moving around the guide',
+          h('ul', { class: 'bot-steps' },
+            h('li', {}, 'Each step starts at its heading, which says which step you’re on. Press Tab to go through what’s in it.'),
+            h('li', {}, 'Next, Back and Skip are at the bottom. The list of steps lets you jump to any of them.'),
+            h('li', {}, 'Every step can be skipped, and every setting can be changed later in its own section.'),
+            h('li', {}, 'Escape closes the guide. Open it again any time from App → Setup guide in the sidebar.'))),
       ],
       next: 'Let’s go',
     },
 
     {
+      id: 'display',
+      label: 'Look',
+      title: 'Make it comfortable to use',
+      overview: 'text size, contrast and screen reader announcements',
+      render: () => [
+        UI.lead('Set these first, so the rest of the guide is easier to use. They change the whole app straight away.'),
+        mirror('uiScale', 'Size of everything', 'Makes text and buttons bigger, all through the app.'),
+        mirror('theme', 'Theme', 'Light or dark, or whatever your computer uses.'),
+        mirror('highContrast', 'Stronger contrast and thicker outlines'),
+        mirror('reduceMotion', 'Stop animations and blinking'),
+        mirror('announce', 'Announce what happens, for screen readers', 'Says when reading pauses, resumes or skips, and when the volume changes. Chat messages aren’t announced, since they’re read out loud anyway.'),
+        h('p', { class: 'hint' }, 'All of these are under App → Display.'),
+      ],
+    },
+
+    {
+      id: 'chats',
+      label: 'Chats',
+      overview: 'your channel, and YouTube or TikTok if you stream there too',
+      title: 'Which chats should be read?',
+      done: () => (host.readerChats ? host.readerChats().length > 0 : false),
+      render: (redraw) => {
+        const me = Bot.twitch.accounts.streamer;
+        const reading = host.readerChats ? host.readerChats() : [];
+        const yt = UI.text(S, 'chatYoutube', { placeholder: '@handle or a channel link' });
+        yt.setAttribute('aria-label', 'YouTube channel');
+        const tt = UI.text(S, 'chatTiktok', { placeholder: '@username' });
+        tt.setAttribute('aria-label', 'TikTok username');
+        const twitch = me
+          ? UI.check(S, 'chatTwitch', `Your Twitch chat, #${me.login}`)
+          : UI.field('Twitch channel', UI.text(S, 'chatTwitchName', { placeholder: 'yourchannel or a twitch.tv link' }), Bot.enabled() ? 'Not logged in yet, so type the channel.' : 'Your channel’s name, or a link to it. Reading a Twitch chat doesn’t need a login.');
+        const start = UI.button('Start reading', () => {
+          const done = [];
+          const name = me ? (S.chatTwitch ? me.login : '') : (S.chatTwitchName || '').trim();
+          if (name && host.readChat('twitch', name)) done.push(`Twitch #${name.replace(/^#/, '')}`);
+          if (S.chatYoutube.trim() && host.readChat('youtube', S.chatYoutube)) done.push('YouTube');
+          if (S.chatTiktok.trim() && host.readChat('tiktok', S.chatTiktok)) done.push('TikTok');
+          S.chatsNote = done.length ? `Reading ${done.join(', ')}. A chat that isn’t live yet waits for the stream to start.` : 'Pick at least one chat first.';
+          say(S.chatsNote);
+          redraw();
+        }, { cls: 'btn small primary' });
+        return [
+          UI.lead('Chat Reader can read several chats at once, all in one queue. They’re the fields in the top bar of the Dashboard, where you can add or change them later.'),
+          twitch,
+          h('details', { class: 'fx-more setup-more', open: !!(S.chatYoutube || S.chatTiktok) },
+            h('summary', {}, 'Also streaming on YouTube or TikTok?'),
+            h('p', { class: 'hint' }, 'Their chats are read in the same queue. A channel that isn’t live yet is fine: it waits and starts when you go live.'),
+            UI.row(UI.field('YouTube', yt), UI.field('TikTok', tt))),
+          UI.row(start),
+          S.chatsNote ? h('p', { class: 'hint', role: 'status' }, S.chatsNote) : null,
+          reading.length ? tick(true, `In the top bar now: ${reading.map((c) => `${PLATFORMS[c.platform] ? PLATFORMS[c.platform].name : c.platform} ${c.target || ''}`.trim()).join(', ')}`) : null,
+        ];
+      },
+    },
+
+    {
+      id: 'voice',
+      label: 'Voice',
+      title: 'Pick a voice',
+      overview: 'natural neural voices, or your computer’s own',
+      render: (redraw) => {
+        const engine = host.settings.engine;
+        const pick = (value) => {
+          const radio = document.querySelector(`input[name="engine"][value="${value}"]`);
+          if (radio && !radio.checked) { radio.checked = true; radio.dispatchEvent(new Event('change', { bubbles: true })); }
+          say(value === 'kokoro' ? 'Neural voices picked. They load in the background.' : 'System voices picked.');
+          redraw();
+        };
+        const status = h('p', { class: 'hint', 'aria-live': 'off' });
+        const updateStatus = () => {
+          const v = host.voiceStatus();
+          status.textContent = v.text ? `Voices: ${v.text}` : '';
+        };
+        updateStatus();
+        clearInterval(voiceTimer);
+        voiceTimer = setInterval(() => { if (dialog.open && steps()[index] && steps()[index].id === 'voice') updateStatus(); else clearInterval(voiceTimer); }, 700);
+        return [
+          UI.lead('Every chatter gets a voice of their own from a pool, and keeps it, so you can tell people apart by ear.'),
+          h('div', { class: 'setup-choices', role: 'group', 'aria-label': 'Voice engine' },
+            choiceCard(engine === 'kokoro', 'Neural voices', 'The most natural. They run on this computer, in English. The model downloads once (around 90 MB), then loads from the cache.', () => pick('kokoro')),
+            choiceCard(engine === 'system', 'System voices', 'Built into your computer. They start instantly and cover many languages, including the ones your screen reader uses.', () => pick('system'))),
+          status,
+          engine === 'system' ? mirror('systemLang', 'Language', 'Which language’s voices go in the pool.') : null,
+          mirror('varyVoices', 'Vary pitch and pace a little per chatter', 'Makes chatters easier to tell apart when several share a voice.'),
+          UI.row(sampleButton('Hi chat! This is how your messages will sound.')),
+          sampleNote(),
+          h('p', { class: 'hint' }, 'Reader → Voices has the full list, to choose which voices are in the pool. To give one chatter a different voice, open their name in the chat list.'),
+        ];
+      },
+    },
+
+    {
+      id: 'speed',
+      label: 'Speed & volume',
+      title: 'Speed and volume',
+      overview: 'how fast and how loud chat is read',
+      render: () => [
+        UI.lead('If you’re used to a fast screen reader, turn the speed up. Both can also be changed any time from the Dashboard, or with the volume shortcuts.'),
+        mirror('rate', 'Speed'),
+        mirror('volume', 'Volume'),
+        UI.row(sampleButton('This is how fast and how loud chat will be read.')),
+        sampleNote(),
+      ],
+    },
+
+    {
+      id: 'reading',
+      label: 'What’s read',
+      title: 'What gets read out',
+      overview: 'names, replies, emotes, and what to leave out',
+      render: () => [
+        UI.lead('How each message is said, and what’s skipped. The defaults suit most streams.'),
+        UI.section('Each message',
+          mirror('nameFormat', 'Say the chatter’s name'),
+          mirror('collapseNames', 'Don’t repeat the name for back-to-back messages from the same chatter'),
+          mirror('quoteParent', 'For replies, also read the message being replied to'),
+          mirror('readEvents', 'Read subs, raids, gifts and announcements'),
+          mirror('readEmojis', 'Read emojis'),
+          mirror('emoteMode', 'Emotes')),
+        UI.section('Keeping up with a busy chat',
+          mirror('maxLength', 'Cut long messages after this many characters'),
+          mirror('catchUp', 'Skip old messages when more than this many are waiting', '0 reads everything, however far behind it gets.'),
+          mirror('replay', 'Let me hear messages again after they were read', 'The replay shortcut goes back one message per press.')),
+        UI.section('Leave out',
+          mirror('skipCommands', 'Bot commands (messages starting with !)'),
+          mirror('skipLinks', 'Messages with links'),
+          mirror('ignoredUsers', 'Chatters never to read', 'Usernames separated by commas, for example other bots.')),
+        h('p', { class: 'hint' }, 'More under Reader → Reading, Nicknames and Filters.'),
+      ],
+    },
+
+    {
+      id: 'viewers',
+      label: 'Viewer controls',
+      title: 'What viewers can change',
+      overview: 'let chat pick its own voices',
+      render: () => [
+        UI.lead('Viewers can pick their own voice by typing a command in chat, and your mods can pause or skip the reader for you.'),
+        mirror('voiceCommandWho', `Who can pick their own voice with ${host.settings.voiceCommand || '!voice'}`),
+        mirror('voiceConfirm', 'Say “… now sounds like this” in the new voice'),
+        mirror('modCommandWho', `Who can control the reader with ${host.settings.modCommand || '!tts'}`, 'For example “!tts skip”, “!tts pause” or “!tts volume 40”. You, as the broadcaster, always can unless it’s set to Nobody.'),
+        mirror('cheerAnnounce', 'Say who cheered and how many bits'),
+        h('p', { class: 'hint' }, 'Reader → Viewer controls has the rest: the command names, voice effects for bits, and channel point rewards.'),
+      ],
+    },
+
+    {
+      id: 'keys',
+      label: 'Shortcuts',
+      title: 'Shortcuts that work in-game',
+      overview: 'control the reader without leaving your game',
+      render: (redraw) => {
+        const keys = host.settings.keys || {};
+        const names = [['pause', 'Pause / resume'], ['skip', 'Skip the message'], ['replay', 'Hear the last one again'], ['volumeUp', 'Volume up'], ['volumeDown', 'Volume down'], ['clear', 'Clear what’s waiting'], ['toggleWindow', 'Show or hide this window']];
+        const global = { on: !!host.settings.globalHotkeys };
+        const box = UI.check(global, 'on', 'Let these work while another app (a game, Discord) is focused', {
+          onChange: (on) => {
+            const real = document.getElementById('globalHotkeys');
+            if (real && real.checked !== on) { real.checked = on; real.dispatchEvent(new Event('change', { bubbles: true })); }
+            redraw();
+          },
+        });
+        return [
+          UI.lead(`Control the reader without leaving your game. Every one can be changed under App → Shortcuts${Bot.enabled() ? ' & API, where you can also give the bot’s own effects a hotkey' : ''}.`),
+          h('dl', { class: 'setup-keys' }, names.filter(([k]) => keys[k] !== undefined).flatMap(([k, label]) => [
+            h('dt', {}, h('kbd', {}, host.keyLabel(keys[k]) || 'none')), h('dd', {}, label)])),
+          box,
+          mirror('mediaKeys', 'Use the keyboard’s media keys too: play/pause pauses, next skips and previous replays'),
+          window.chatReaderDesktop.platform === 'darwin' ? h('p', { class: 'hint' }, 'On macOS, the media keys need the app allowed under System Settings → Privacy & Security → Accessibility. App → Shortcuts has a button that asks for it.') : null,
+        ];
+      },
+    },
+
+    {
+      id: 'bot',
+      label: 'Bot tools (beta)',
+      title: 'Bot and stream tools (beta)',
+      overview: 'optional: a Twitch bot, alerts and an OBS overlay',
+      render: (redraw) => [
+        UI.lead('Optional. Chat Reader can also run a Twitch bot and stream tools. They’re new and still in beta, so they’re off unless you turn them on. You don’t need them to have chat read out loud.'),
+        Bot.shell.botSwitch({ where: 'setup', onChange: () => redraw() }),
+        h('ul', { class: 'bot-steps' }, Bot.shell.FEATURES.map(([name, text]) => h('li', {}, h('strong', {}, name), `: ${text}.`))),
+        h('p', { class: 'hint' }, Bot.enabled()
+          ? `Turned on. The next ${steps().filter((s) => s.bot).length} steps set up your Twitch login, OBS and a few starter alerts.`
+          : 'Left off, the next step is the last. You can turn this on later under App → Bot tools.'),
+      ],
+    },
+
+    {
       id: 'app',
+      bot: true,
       label: 'Twitch app',
       title: 'Make your Twitch application',
       done: () => looksLikeClientId(Bot.data.clientId),
@@ -105,6 +386,7 @@
 
     {
       id: 'login',
+      bot: true,
       label: 'Log in',
       title: 'Log in to Twitch',
       done: () => Bot.twitch.loggedIn(),
@@ -127,78 +409,8 @@
     },
 
     {
-      id: 'chats',
-      label: 'Chats',
-      title: 'Which chats should be read?',
-      done: () => (host.readerChats ? host.readerChats().length > 0 : false),
-      render: (redraw) => {
-        const me = Bot.twitch.accounts.streamer;
-        const reading = host.readerChats ? host.readerChats() : [];
-        const yt = UI.text(S, 'chatYoutube', { placeholder: '@handle or a channel link' });
-        yt.setAttribute('aria-label', 'YouTube channel');
-        const tt = UI.text(S, 'chatTiktok', { placeholder: '@username' });
-        tt.setAttribute('aria-label', 'TikTok username');
-        const twitch = me
-          ? UI.check(S, 'chatTwitch', `Your Twitch chat, #${me.login}`)
-          : UI.field('Twitch channel', UI.text(S, 'chatTwitchName', { placeholder: 'yourchannel or a twitch.tv link' }), 'Not logged in yet, so type the channel.');
-        const start = UI.button('Start reading', () => {
-          const done = [];
-          const name = me ? (S.chatTwitch ? me.login : '') : (S.chatTwitchName || '').trim();
-          if (name && host.readChat('twitch', name)) done.push(`Twitch #${name.replace(/^#/, '')}`);
-          if (S.chatYoutube.trim() && host.readChat('youtube', S.chatYoutube)) done.push('YouTube');
-          if (S.chatTiktok.trim() && host.readChat('tiktok', S.chatTiktok)) done.push('TikTok');
-          S.chatsNote = done.length ? `Reading ${done.join(', ')}. A chat that isn’t live yet waits for the stream to start.` : 'Pick at least one chat first.';
-          redraw();
-        }, { cls: 'btn small primary' });
-        return [
-          UI.lead('Chat Reader can read several chats at once, all in one queue. They’re the fields in the top bar of the Dashboard, where you can add or change them later.'),
-          twitch,
-          h('details', { class: 'fx-more setup-more', open: !!(S.chatYoutube || S.chatTiktok) },
-            h('summary', {}, 'Also streaming on YouTube or TikTok?'),
-            h('p', { class: 'hint' }, 'Their chats are read in the same queue. A channel that isn’t live yet is fine: it waits and starts when you go live.'),
-            UI.row(UI.field('YouTube', yt), UI.field('TikTok', tt))),
-          UI.row(start),
-          S.chatsNote ? h('p', { class: 'hint', role: 'status' }, S.chatsNote) : null,
-          reading.length ? tick(true, `In the top bar now: ${reading.map((c) => `${PLATFORMS[c.platform] ? PLATFORMS[c.platform].name : c.platform} ${c.target || ''}`.trim()).join(', ')}`) : null,
-        ];
-      },
-    },
-
-    {
-      id: 'voice',
-      label: 'Voice',
-      title: 'Pick a voice',
-      render: (redraw) => {
-        const engine = host.settings.engine;
-        const pick = (value) => {
-          const radio = document.querySelector(`input[name="engine"][value="${value}"]`);
-          if (radio && !radio.checked) { radio.checked = true; radio.dispatchEvent(new Event('change', { bubbles: true })); }
-          redraw();
-        };
-        const status = h('p', { class: 'hint', role: 'status' });
-        const updateStatus = () => {
-          const v = host.voiceStatus();
-          status.textContent = v.text ? `Voices: ${v.text}` : '';
-        };
-        updateStatus();
-        clearInterval(voiceTimer);
-        voiceTimer = setInterval(() => { if (dialog.open && STEPS[index].id === 'voice') updateStatus(); else clearInterval(voiceTimer); }, 700);
-        const volume = { value: host.state().volume };
-        return [
-          UI.lead('Every chatter gets a voice of their own from a pool, so you can tell people apart without looking.'),
-          h('div', { class: 'setup-choices', role: 'group', 'aria-label': 'Voice engine' },
-            choiceCard(engine === 'kokoro', 'Neural voices', 'The most natural. They run on this computer, in English. The model downloads once (around 90 MB), then loads from the cache.', () => pick('kokoro')),
-            choiceCard(engine === 'system', 'System voices', 'Built into your computer. They start instantly and cover many languages.', () => pick('system'))),
-          status,
-          UI.field('Volume', UI.range(volume, 'value', { onChange: (n) => host.setVolume(n) })),
-          UI.row(UI.button('▶ Hear a sample', () => host.speak('Hi chat! This is how your messages will sound.', { priority: true, label: 'Setup' }), { cls: 'btn small primary' })),
-          h('p', { class: 'hint' }, 'Reader → Voices has the full list, to choose which voices are in the pool.'),
-        ];
-      },
-    },
-
-    {
       id: 'obs',
+      bot: true,
       label: 'OBS',
       title: 'Connect OBS',
       done: () => Bot.obs.state === 'connected',
@@ -227,6 +439,7 @@
               UI.button('Send a test alert', () => {
                 Bot.effects.run([{ ...Bot.effects.newEffect('alert'), title: 'It works!', message: 'This is a test alert from Chat Reader.' }], UI.testContext());
                 S.alertNote = (Bot.overlayStatus || {}).clients ? 'Sent. It should be on your OBS preview now.' : 'Sent, but no overlay is open yet. Add the browser source, then try again.';
+                say(S.alertNote);
                 redraw();
               }, { cls: 'btn small primary' }),
               UI.button('Open it in the browser', () => Bot.desktop.openOverlay())),
@@ -252,32 +465,8 @@
     },
 
     {
-      id: 'keys',
-      label: 'Shortcuts',
-      title: 'Shortcuts that work in-game',
-      render: (redraw) => {
-        const keys = host.settings.keys || {};
-        const names = [['pause', 'Pause / resume'], ['skip', 'Skip the message'], ['replay', 'Hear the last one again'], ['volumeUp', 'Volume up'], ['volumeDown', 'Volume down'], ['clear', 'Clear what’s waiting']];
-        const global = { on: !!host.settings.globalHotkeys };
-        const box = UI.check(global, 'on', 'Let these work while another app (a game, Discord) is focused', {
-          onChange: (on) => {
-            const real = document.getElementById('globalHotkeys');
-            if (real && real.checked !== on) { real.checked = on; real.dispatchEvent(new Event('change', { bubbles: true })); }
-            redraw();
-          },
-        });
-        return [
-          UI.lead('Control the reader without leaving your game. Every one can be changed under App → Shortcuts & API, where you can also give the bot’s own effects a hotkey.'),
-          h('dl', { class: 'setup-keys' }, names.filter(([k]) => keys[k] !== undefined).flatMap(([k, label]) => [
-            h('dt', {}, h('kbd', {}, host.keyLabel(keys[k]) || '—')), h('dd', {}, label)])),
-          box,
-          window.chatReaderDesktop.platform === 'darwin' ? h('p', { class: 'hint' }, 'On macOS, the keyboard’s media keys need the app allowed under System Settings → Privacy & Security → Accessibility. Shortcuts & API has a button that asks for it.') : null,
-        ];
-      },
-    },
-
-    {
       id: 'starter',
+      bot: true,
       label: 'Head start',
       title: 'A head start',
       render: (redraw) => [
@@ -286,7 +475,7 @@
         UI.check(S.starter, 'raidThanks', 'Thank raiders in chat: “Thanks for the raid, @name!”'),
         UI.check(S.starter, 'followSpeak', 'Say new followers out loud with the reader'),
         UI.check(S.starter, 'points', 'Loyalty points for watching (1 a minute, !points to check)'),
-        UI.row(UI.button('Add these', () => { S.starterNote = addStarter(); redraw(); }, { cls: 'btn small primary' })),
+        UI.row(UI.button('Add these', () => { S.starterNote = addStarter(); say(S.starterNote); redraw(); }, { cls: 'btn small primary' })),
         S.starterNote ? h('p', { class: 'hint', role: 'status' }, S.starterNote) : null,
         UI.section('Coming from another bot?',
           UI.lead('Commands, events, timers, quotes and viewers with their points can be brought over from Firebot or Mix It Up.'),
@@ -299,25 +488,35 @@
       label: 'Done',
       title: 'You’re set',
       render: () => {
+        const voice = host.voiceStatus();
         const items = [
-          ['Twitch application', looksLikeClientId(Bot.data.clientId), 'account'],
-          [Bot.twitch.loggedIn() ? `Logged in as ${Bot.twitch.accounts.streamer.displayName}` : 'Logged in to Twitch', Bot.twitch.loggedIn(), 'account'],
           ['Reading chat', host.readerChats().length > 0, 'dashboard'],
-          ['Overlay in OBS', !!(Bot.overlayStatus && Bot.overlayStatus.clients), 'overlay'],
-          ['OBS remote control', Bot.obs.state === 'connected', 'obs'],
+          [voice.text ? `Voice: ${voice.text}` : 'Voice', voice.state !== 'error', 'voices'],
+          ...(Bot.enabled() ? [
+            ['Twitch application', looksLikeClientId(Bot.data.clientId), 'account'],
+            [Bot.twitch.loggedIn() ? `Logged in as ${Bot.twitch.accounts.streamer.displayName}` : 'Logged in to Twitch', Bot.twitch.loggedIn(), 'account'],
+            ['Overlay in OBS', !!(Bot.overlayStatus && Bot.overlayStatus.clients), 'overlay'],
+            ['OBS remote control', Bot.obs.state === 'connected', 'obs'],
+          ] : []),
         ];
         return [
           UI.lead('Here’s where things stand. Anything not done yet can be finished in its section; a dot next to a section in the sidebar shows when something there needs you.'),
           h('ul', { class: 'setup-summary' }, items.map(([text, ok, page]) => h('li', {},
             h('span', { class: `setup-mark${ok ? ' ok' : ''}`, 'aria-hidden': 'true' }, ok ? '✓' : '–'),
             h('span', {}, text, h('span', { class: 'sr-only' }, ok ? ', done' : ', not yet')),
-            ok ? null : UI.button('Set up', () => goTo(page), { cls: 'link' })))),
+            ok ? null : UI.button('Set up', () => goTo(page), { cls: 'link', aria: `Set up: ${text}` })))),
           UI.section('Where to next',
             h('ul', { class: 'bot-steps' },
-              h('li', {}, h('strong', {}, 'Commands'), ': your own !commands, with cooldowns and who may use them.'),
-              h('li', {}, h('strong', {}, 'Viewer controls'), ': let viewers pick their voice with bits, points or !voice.'),
-              h('li', {}, h('strong', {}, 'Timers'), ': a message every so often, only while chat is active.'),
-              h('li', {}, h('strong', {}, 'Multistream'), ': join your Twitch, YouTube and TikTok chats together.'))),
+              h('li', {}, h('strong', {}, 'Dashboard'), ': the chats to read, pause and skip, and what’s being read now.'),
+              h('li', {}, h('strong', {}, 'Nicknames'), ': have a chatter’s name said the way you want.'),
+              h('li', {}, h('strong', {}, 'Screen reader'), ', under Accessibility: reads text from parts of the screen out loud, for games that don’t.'),
+              ...(Bot.enabled() ? [
+                h('li', {}, h('strong', {}, 'Commands'), ': your own !commands, with cooldowns and who may use them.'),
+                h('li', {}, h('strong', {}, 'Timers'), ': a message every so often, only while chat is active.'),
+                h('li', {}, h('strong', {}, 'Multistream'), ': join your Twitch, YouTube and TikTok chats together.'),
+              ] : [
+                h('li', {}, h('strong', {}, 'Bot tools (beta)'), ', under App: a Twitch bot, alerts and an OBS overlay, if you want them later.'),
+              ]))),
         ];
       },
       next: 'Finish',
@@ -409,7 +608,7 @@
   const counter = h('p', { class: 'hint setup-count' });
   const back = UI.button('Back', () => show(index - 1));
   const skip = UI.button('Skip this step', () => show(index + 1), { cls: 'btn small ghost' });
-  const next = UI.button('Next', () => (index === STEPS.length - 1 ? finish() : show(index + 1)), { cls: 'btn small primary' });
+  const next = UI.button('Next', () => (index === steps().length - 1 ? finish() : show(index + 1)), { cls: 'btn small primary' });
   const close = UI.button('✕', () => finish(), { cls: 'x close-btn', aria: 'Close the setup guide' });
 
   dialog.append(h('div', { class: 'dialog-box' },
@@ -419,22 +618,36 @@
       UI.button('Skip the guide', () => finish(), { cls: 'link setup-quit' }),
       back, skip, next)));
 
+  // A control's name for finding it again after a redraw: its id when it has
+  // a lasting one, else its label or text.
+  const keyOf = (el) => (el.id && !/^bot-f\d+$/.test(el.id) ? `#${el.id}` : el.getAttribute('aria-label') || el.textContent);
+
   function draw() {
-    const step = STEPS[index];
-    title.textContent = step.title;
-    counter.textContent = `Step ${index + 1} of ${STEPS.length}`;
-    progress.replaceChildren(...STEPS.map((s, i) => h('li', {},
-      h('button', {
-        type: 'button',
-        class: 'setup-dot',
-        'data-state': i === index ? 'current' : s.done && s.done() ? 'done' : i < index ? 'seen' : '',
-        'aria-current': i === index ? 'step' : null,
-        onclick: () => show(i),
-      }, h('span', { class: 'setup-dot-mark', 'aria-hidden': 'true' }, s.done && s.done() ? '✓' : String(i + 1)), h('span', {}, s.label)))));
+    const list = steps();
+    index = Math.max(0, Math.min(list.length - 1, index));
+    const step = list[index];
+    // The heading is where each step starts, so it says which step it is.
+    title.replaceChildren(step.title, h('span', { class: 'sr-only' }, `, step ${index + 1} of ${list.length}`));
+    counter.textContent = `Step ${index + 1} of ${list.length}`;
+    counter.setAttribute('aria-hidden', 'true');
+    progress.replaceChildren(...list.map((s, i) => {
+      const done = !!(s.done && s.done());
+      return h('li', {},
+        h('button', {
+          type: 'button',
+          class: 'setup-dot',
+          'data-state': i === index ? 'current' : done ? 'done' : i < index ? 'seen' : '',
+          'aria-current': i === index ? 'step' : null,
+          onclick: () => show(i),
+        },
+        h('span', { class: 'setup-dot-mark', 'aria-hidden': 'true' }, done ? '✓' : String(i + 1)),
+        h('span', {}, s.label),
+        done ? h('span', { class: 'sr-only' }, ', done') : null));
+    }));
 
     // Redrawing replaces every control; keep the caret where it was.
     const focused = body.contains(document.activeElement) ? document.activeElement : null;
-    const focusKey = focused && (focused.getAttribute('aria-label') || focused.textContent);
+    const focusKey = focused && keyOf(focused);
     const scroll = body.scrollTop;
     try {
       body.replaceChildren(...[step.render(redraw)].flat().filter(Boolean));
@@ -444,12 +657,12 @@
     }
     body.scrollTop = scroll;
     if (focusKey) {
-      const again = [...body.querySelectorAll('button, input, select, textarea')].find((x) => (x.getAttribute('aria-label') || x.textContent) === focusKey);
+      const again = [...body.querySelectorAll('button, input, select, textarea')].find((x) => keyOf(x) === focusKey);
       if (again) again.focus();
     }
 
     back.hidden = index === 0;
-    skip.hidden = index === 0 || index === STEPS.length - 1 || (step.done && step.done());
+    skip.hidden = index === 0 || index === list.length - 1 || (step.done && step.done());
     next.textContent = step.next || 'Next';
   }
 
@@ -466,10 +679,10 @@
       draw();
     }, 50);
   }
-  for (const type of ['accounts', 'login', 'logout', 'obs', 'overlay']) Bot.on(type, redraw);
+  for (const type of ['accounts', 'login', 'logout', 'obs', 'overlay', 'enabled']) Bot.on(type, redraw);
 
   function show(i) {
-    index = Math.max(0, Math.min(STEPS.length - 1, i));
+    index = Math.max(0, Math.min(steps().length - 1, i));
     body.scrollTop = 0;
     draw();
     title.tabIndex = -1;
@@ -489,9 +702,19 @@
 
   // `step` is a step's id, to open the guide there.
   Setup.open = (step = '') => {
-    const at = STEPS.findIndex((s) => s.id === step);
+    const at = steps().findIndex((s) => s.id === step);
     if (!dialog.open) dialog.showModal();
     show(at === -1 ? 0 : at);
   };
-  Setup.steps = STEPS;
+  Setup.steps = steps;
+
+  // App → Setup guide: open it again, from the start or at any step.
+  UI.addTab('setupGuide', 'Setup guide', (panel) => {
+    panel.append(
+      UI.row(UI.button('Start the setup guide', () => Setup.open(), { cls: 'btn small primary' })),
+      UI.section('Or go straight to a step',
+        h('ul', { class: 'bot-steps' }, steps().filter((s) => s.id !== 'welcome').map((s) => h('li', {},
+          UI.button(s.title, () => Setup.open(s.id), { cls: 'link' }),
+          s.overview ? h('span', { class: 'hint' }, ` (${s.overview})`) : null)))));
+  }, { listens: ['enabled'] });
 })();

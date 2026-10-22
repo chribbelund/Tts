@@ -174,6 +174,13 @@
 
   Sp.cancelLogin = () => Bot.desktop.cancelSpotifyLogin();
 
+  // The bot was switched off: stop watching Spotify, but stay logged in.
+  Sp.stop = () => {
+    stopPolling();
+    clearTimeout(Sp.retryTimer);
+    setState('idle');
+  };
+
   Sp.logout = async () => {
     stopPolling();
     clearTimeout(Sp.retryTimer);

@@ -259,6 +259,15 @@ p.code-box { display: block; }
 .has-shell .chatter-dialog { width: min(500px, calc(100% - 32px)); }
 .has-shell .chatter-dialog .chatter-body { overflow-y: auto; max-height: calc(100vh / var(--ui-zoom) - 140px); }
 
+/* ---------- the bot's on/off switch (beta), shell.js ---------- */
+/* Off, the dashboard is the reader's player and chat only. */
+.bot-off.has-shell .layout.dash { grid-template-columns: minmax(0, 1fr); }
+.bot-switch { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.bot-switch-label { font-size: 15px; font-weight: 600; align-items: center; }
+.bot-switch-label input { width: 20px; height: 20px; flex: none; }
+.bot-switch .hint { margin: 0; }
+.beta-badge { display: inline-block; margin-left: 8px; padding: 1px 8px; border: 1px solid var(--warn); border-radius: 999px; color: var(--warn); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; line-height: 1.5; }
+
 /* ---------- setup guide (setup.js) ---------- */
 .bot-setup { width: min(900px, calc(100% - 24px)); height: min(680px, calc(100% - 24px)); }
 .bot-setup .dialog-box { display: flex; flex-direction: column; }

@@ -73,6 +73,11 @@ function accrue() {
   Bot.emit('viewers');
 }
 
+Community.stop = () => {
+  for (const t of Community.timers) clearInterval(t);
+  Community.timers = [];
+};
+
 Community.start = () => {
   for (const t of Community.timers) clearInterval(t);
   pollStream();

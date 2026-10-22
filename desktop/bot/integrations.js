@@ -28,7 +28,7 @@
   const ROLE_NAMES = ['Viewer', 'Subscriber', 'VIP', 'Mod', 'Broadcaster'];
 
   host.chatterExtra = (entry) => {
-    if (!Bot.data || !entry || !entry.login) return null;
+    if (!Bot.enabled() || !entry || !entry.login) return null;
     const platform = entry.platform || 'twitch';
     const login = String(entry.login).toLowerCase();
     const v = Bot.viewersDb.byLogin(login, platform);
@@ -95,7 +95,7 @@
   const answeredAt = new Map();
 
   host.onReaderCommand = (entry, { kind, args, result }) => {
-    if (!Bot.ready || !Bot.data.answerReaderCommands || !Bot.twitch.loggedIn()) return;
+    if (!Bot.ready || !Bot.enabled() || !Bot.data.answerReaderCommands || !Bot.twitch.loggedIn()) return;
     if ((entry.platform || 'twitch') !== 'twitch' || entry.sourceLabel !== `#${Bot.twitch.streamerLogin()}`) return;
     // One answer per chatter every few seconds, so flipping through voices
     // doesn't fill the chat.

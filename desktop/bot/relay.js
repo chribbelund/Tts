@@ -73,7 +73,7 @@ Relay.videoId = () => {
 
 // Opens or closes the relay's own YouTube and TikTok connections.
 Relay.sync = () => {
-  const on = cfg().enabled;
+  const on = cfg().enabled && Bot.enabled();
   for (const platform of ['youtube', 'tiktok']) {
     const target = on ? targetFor(platform) : '';
     const needOwn = !!target && !readerChatFor(platform);
@@ -428,7 +428,10 @@ Relay.YT_UNITS = YT_UNITS;
 // Start
 // ---------------------------------------------------------------------------
 
+let relayStarted = false;
 Relay.start = () => {
+  if (relayStarted) { Relay.sync(); return; }
+  relayStarted = true;
   window.chatReaderDesktop.onSourceEvent(onSourceEvent);
   Relay.youtubeLoadAccount();
   Relay.sync();
