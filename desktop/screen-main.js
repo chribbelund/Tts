@@ -10,6 +10,8 @@
 //   - shows the windows that sit on top of a game: the zone editor, the zone
 //     outlines and reading highlight, and the lens (a magnifier that follows
 //     what's being read instead of the mouse)
+//   - notices which program is in front, so a game's profile can be picked
+//     by itself when the game comes up
 // All three windows are kept out of screen captures, so the reader never
 // reads its own outlines or magnifies its own lens.
 
@@ -389,6 +391,138 @@ function updateLens(state) {
 }
 
 // ---------------------------------------------------------------------------
+// Which program is in front, so each game can have its own profile
+// ---------------------------------------------------------------------------
+
+const apps = {
+  proc: null,
+  wanted: false,
+  front: null,       // the program in front now
+  lastOther: null,   // the last program in front that wasn't this app
+  restarts: [],
+  retry: null,
+};
+
+function appsCommand(mode) {
+  if (IS_MAC) {
+    const script = `const MODE = ${JSON.stringify(mode)};\n${fs.readFileSync(path.join(SCREEN_DIR, 'apps-mac.js'), 'utf8')}`;
+    return ['osascript', ['-l', 'JavaScript', '-e', script], {}];
+  }
+  if (IS_WIN) {
+    const script = `$Mode = '${mode}'\n${fs.readFileSync(path.join(SCREEN_DIR, 'apps-win.ps1'), 'utf8')}`;
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    return ['powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], { windowsHide: true }];
+  }
+  return null;
+}
+
+function cleanApp(a) {
+  if (!a || typeof a !== 'object') return null;
+  const s = (v, n = 120) => String(v || '').trim().slice(0, n);
+  const app = { pid: Number(a.pid) || 0, exe: s(a.exe), name: s(a.name), id: s(a.id), title: s(a.title, 200) };
+  return app.exe || app.name || app.id ? app : null;
+}
+
+// Reads JSON lines from a helper and hands each to onMessage.
+function readLines(proc, onMessage) {
+  let buffer = '';
+  proc.stdout.setEncoding('utf8');
+  proc.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    let at;
+    while ((at = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, at).trim();
+      buffer = buffer.slice(at + 1);
+      if (!line.startsWith('{')) continue;
+      try { onMessage(JSON.parse(line)); } catch {}
+    }
+  });
+}
+
+function stopAppWatch() {
+  clearTimeout(apps.retry);
+  apps.retry = null;
+  const proc = apps.proc;
+  apps.proc = null;
+  if (proc) { proc.removeAllListeners(); try { proc.kill(); } catch {} }
+}
+
+function startAppWatch() {
+  if (apps.proc || !apps.wanted) return;
+  const command = appsCommand('watch');
+  if (!command) return;
+  const now = Date.now();
+  apps.restarts = apps.restarts.filter((t) => now - t < 60000);
+  if (apps.restarts.length >= 4) return;
+  apps.restarts.push(now);
+  const [cmd, args, options] = command;
+  let proc;
+  try { proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'], ...options }); } catch { return; }
+  apps.proc = proc;
+  readLines(proc, (msg) => {
+    if (msg.error) { notifyPage('app-error', String(msg.error).slice(0, 300)); return; }
+    const app = cleanApp(msg.app);
+    if (!app) return;
+    apps.front = app;
+    // This app coming to the front (to change a setting) says nothing about the game.
+    if (app.pid === process.pid) return;
+    apps.lastOther = app;
+    notifyPage('app', app);
+  });
+  const restart = () => {
+    if (apps.proc !== proc) return;
+    apps.proc = null;
+    if (apps.wanted) apps.retry = setTimeout(startAppWatch, 5000);
+  };
+  proc.on('error', restart);
+  proc.on('exit', restart);
+}
+
+function watchApps(on) {
+  apps.wanted = !!on;
+  if (apps.wanted) startAppWatch();
+  else stopAppWatch();
+  return { supported: !!appsCommand('watch'), lastOther: apps.lastOther };
+}
+
+// The programs with a window open right now, for picking one from a list.
+function listApps() {
+  const command = appsCommand('list');
+  if (!command) return Promise.resolve({ apps: [], error: 'Not on this system' });
+  return new Promise((resolve) => {
+    const [cmd, args, options] = command;
+    let proc;
+    try { proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'], ...options }); } catch (err) { resolve({ apps: [], error: err.message }); return; }
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { proc.kill(); } catch {}
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ apps: [], error: 'It took too long to list the programs' }), 15000);
+    readLines(proc, (msg) => {
+      if (msg.error) finish({ apps: [], error: String(msg.error) });
+      else if (Array.isArray(msg.apps)) {
+        const seen = new Set();
+        const list = msg.apps.map(cleanApp).filter((a) => {
+          if (!a || a.pid === process.pid) return false;
+          const key = (a.exe || a.name).toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        list.sort((a, b) => (a.name || a.exe).localeCompare(b.name || b.exe));
+        finish({ apps: list });
+      }
+    });
+    proc.on('error', (err) => finish({ apps: [], error: err.message }));
+    proc.on('exit', () => setTimeout(() => finish({ apps: [], error: 'No programs came back' }), 200));
+  });
+}
+
+// ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
 
@@ -435,6 +569,8 @@ function setup(options) {
     return { running: !!ocr.proc && !ocr.starting, engine: ocr.engine, error: ocr.error, maxSide: ocr.maxSide, supported: !!helperCommand() };
   });
   ipcMain.handle('screen:edit', (_event, payload) => openEditor(payload || {}));
+  ipcMain.handle('screen:watch-apps', (_event, on) => watchApps(on));
+  ipcMain.handle('screen:apps', async () => ({ ...(await listApps()), lastOther: apps.lastOther }));
   ipcMain.on('screen:markers', (_event, state) => updateMarkers(state && typeof state === 'object' ? state : null));
   ipcMain.on('screen:lens', (_event, state) => updateLens(state && typeof state === 'object' ? state : null));
 
@@ -459,6 +595,8 @@ function setup(options) {
 
   app.on('will-quit', () => {
     stopHelper();
+    apps.wanted = false;
+    stopAppWatch();
     for (const win of [markers.win, editor.win, lens.win]) if (win && !win.isDestroyed()) win.destroy();
   });
 }

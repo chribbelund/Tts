@@ -112,7 +112,8 @@ const BOT_DEFAULTS = {
   screen: {
     enabled: false,          // watch the zones of the profile in use
     profile: '',             // id of the profile in use
-    profiles: [],            // [{ id, name, display, zones: [zone] }], see screen.js for a zone
+    profiles: [],            // [{ id, name, display, apps: ['game.exe'], zones: [zone] }], see screen.js for a zone
+    autoProfile: true,       // use a profile by itself when one of its programs is in front
     pauseChat: true,         // chat waits while screen text is read
     showZones: false,        // outlines of the zones on screen
     highlight: true,         // a box around what's being read

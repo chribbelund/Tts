@@ -98,6 +98,66 @@
   }
 
   // -------------------------------------------------------------------------
+  // Only read what matches
+  // -------------------------------------------------------------------------
+
+  const REGEX_SITE = 'https://regex101.com/';
+
+  // Ready-made rules. `ask` asks for the word instead.
+  const ONLY_SUGGESTIONS = [
+    { label: 'My name, or another word (asks which)', ask: true },
+    { label: 'Whispers to me (WoW: “[Name] whispers: …”)', rule: '/whispers:/i' },
+    { label: 'Party and raid chat (WoW)', rule: '/^\\[(party|party leader|raid|raid leader|raid warning)\\]/i' },
+    { label: 'Guild chat (WoW)', rule: '/^\\[(guild|officer)\\]/i' },
+    { label: 'Any of several words (change the words after)', rule: '/\\b(help|heal|inc)\\b/i' },
+    { label: 'Questions (lines ending in ?)', rule: '/\\?\\s*$/' },
+  ];
+
+  function onlyField(z, rebuild) {
+    const bad = h('p', { class: 'warn', role: 'status' });
+    const tryOut = h('span', { class: 'hint', role: 'status' });
+    const sample = { v: '' };
+    const check = () => {
+      const rule = S.badRule(z.only);
+      bad.textContent = rule ? `“${rule}” isn’t a working regular expression, so it’s left out.` : '';
+      bad.hidden = !rule;
+      if (!sample.v.trim()) { tryOut.textContent = ''; return; }
+      tryOut.textContent = S.allowed(z, sample.v) ? '✓ Would be read' : '✗ Would not be read';
+    };
+    const add = (rule) => {
+      const lines = String(z.only || '').split('\n').map((l) => l.trim()).filter(Boolean);
+      if (!lines.includes(rule)) lines.push(rule);
+      z.only = lines.join('\n');
+      rebuild();
+    };
+    const suggest = UI.select({ v: '' }, 'v', [['', '+ Add a suggestion…'], ...ONLY_SUGGESTIONS.map((x, i) => [String(i), x.label])], {
+      label: 'Add a suggestion',
+      onChange: (v) => {
+        if (v === '') return;
+        const pick = ONLY_SUGGESTIONS[Number(v)];
+        if (!pick.ask) { add(pick.rule); return; }
+        const word = prompt('Which word? Lines with it are read, in any case. Your name, for example:', '');
+        if (word && word.trim()) add(word.trim().slice(0, 100));
+        else rebuild();
+      },
+    });
+    const sampleInput = UI.text(sample, 'v', { placeholder: 'e.g. [Guild] [Thrall]: hi Chris, need a heal?', onChange: check });
+    sampleInput.setAttribute('aria-label', 'A line to try the rules on');
+    check();
+    return h('div', { class: 'field nested' },
+      h('div', { class: 'row-label' }, 'Only read'),
+      UI.text(z, 'only', { multiline: true, rows: 3, placeholder: 'Empty reads everything. One per line, e.g.\nChris\n/whispers:/i', onChange: check }),
+      h('p', { class: 'hint' },
+        'When this has something in it, only text with one of these lines in it is read: in a chat box, only the messages that mention your name. ',
+        'A plain word matches in any case. /…/ is a regular expression; ',
+        h('a', { href: REGEX_SITE, target: '_blank', rel: 'noopener' }, 'regex101.com'),
+        ' is a good place to build and try one (pick the ECMAScript/JavaScript flavour). ',
+        'In a chat box each line is checked on its own, so the second line of a long message that wraps is read only if it matches too.'),
+      bad,
+      UI.row(suggest, UI.field('Try a line', sampleInput), tryOut));
+  }
+
+  // -------------------------------------------------------------------------
   // Editing one zone
   // -------------------------------------------------------------------------
 
@@ -123,6 +183,7 @@
             UI.field('Wait for it to settle (ms)', UI.number(z, 'settle', { min: 0, max: 5000, step: 50 }), 'Text being typed out or fading in is read once it stops changing.')),
           UI.field('Say first', UI.text(z, 'prefix', { placeholder: 'e.g. Objective', maxlength: 40 }), 'Said before the text, to tell zones in the same voice apart. Leave empty to say only the text.'),
           UI.field('Leave out', UI.text(z, 'ignore', { multiline: true, rows: 3, placeholder: 'One per line, e.g.\n[E]\n/\\d+ m$/' }), 'Words or phrases never read from this box, one per line. /…/ is a regular expression.'),
+          onlyField(z, rebuild),
           h('div', { class: 'field nested' },
             h('div', { class: 'row-label' }, 'Where on the screen (% of its width and height)'),
             UI.row(pos('x', 'From the left'), pos('y', 'From the top'), pos('w', 'Width'), pos('h', 'Height')),
@@ -202,6 +263,77 @@
   }
   Bot.on('screen-live', drawLive);
 
+  // The open programs, once asked for. Kept here so a redraw doesn't lose them.
+  const appPick = { loading: false, list: null, error: '' };
+
+  function appsBlock(p) {
+    const cfg = c();
+    const same = (name) => (a) => S.appMatches(a, { exe: name, name });
+    const add = (raw) => {
+      const name = String(raw || '').trim().slice(0, 120);
+      if (!name) return;
+      // A program belongs to one profile, or which to use would be a guess.
+      for (const other of cfg.profiles) if (other !== p) other.apps = other.apps.filter((a) => !same(name)(a));
+      if (!p.apps.some(same(name))) p.apps.push(name);
+      save();
+      S.apply();
+    };
+    const remove = (a) => {
+      p.apps = p.apps.filter((x) => x !== a);
+      save();
+      S.apply();
+    };
+    const typed = { v: '' };
+    const input = UI.text(typed, 'v', { placeholder: IS_MAC ? 'e.g. Hades' : 'e.g. eldenring.exe', maxlength: 120 });
+    input.setAttribute('aria-label', 'Program name');
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(typed.v); } });
+    const owner = (app) => S.profileForApp(app);
+    const last = S.app;
+    const lastOwner = last && owner(last);
+
+    return h('div', { class: 'field nested' },
+      h('div', { class: 'row-label' }, 'Programs that use this profile'),
+      h('p', { class: 'hint' }, 'When one of these comes to the front, this profile is used by itself and its name is said. Any other program, like chat or Discord, leaves the profile as it is.'),
+      p.apps.length
+        ? h('ul', { class: 'sr-apps', 'aria-label': `Programs for ${p.name}` }, p.apps.map((a) => h('li', {},
+          h('span', {}, a),
+          UI.button('×', () => remove(a), { cls: 'x', aria: `Remove ${a}`, title: 'Remove' }))))
+        : h('p', { class: 'hint' }, 'None yet, so this profile is only picked by hand or with the Next profile hotkey.'),
+      last && (!lastOwner || lastOwner !== p) ? UI.row(
+        UI.button(`+ Add ${last.name || last.exe}`, () => add(S.appLabel(last)), { cls: 'btn small primary' }),
+        h('span', { class: 'hint' }, lastOwner ? `The program in front last. It’s in “${lastOwner.name}” now and moves here.` : 'The program in front last. Start the game, switch back here and add it.')) : null,
+      UI.row(
+        appPick.list
+          ? UI.select({ v: '' }, 'v', [
+            ['', appPick.list.length ? 'Pick an open program…' : 'No open programs found'],
+            ...appPick.list.map((a) => {
+              const extra = !IS_MAC && a.name && a.exe && S.appKey(a.name) !== S.appKey(a.exe) ? ` (${a.exe})` : '';
+              const where = owner(a);
+              return [S.appLabel(a), `${a.name || a.exe}${extra}${where ? ` · in “${where.name}”` : ''}`];
+            }),
+          ], { label: 'Open programs', onChange: (v) => add(v) })
+          : null,
+        UI.button(appPick.loading ? 'Looking…' : appPick.list ? 'Look again' : 'Choose from open programs…', async () => {
+          appPick.loading = true;
+          UI.rerender();
+          try {
+            const r = await window.chatReaderDesktop.screen.apps();
+            appPick.list = r.apps || [];
+            appPick.error = r.error || '';
+          } catch (err) {
+            appPick.list = [];
+            appPick.error = err.message;
+          } finally {
+            appPick.loading = false;
+            UI.rerender();
+          }
+        }, { disabled: appPick.loading }),
+        UI.field('Or type its name', input),
+        UI.button('Add', () => add(typed.v))),
+      appPick.error ? h('p', { class: 'warn' }, appPick.error) : null,
+      UI.check(cfg, 'autoProfile', 'Switch profile by itself when one of its programs comes to the front', { onChange: () => { save(); S.apply(); } }));
+  }
+
   function profileSection() {
     const cfg = c();
     const p = S.profile();
@@ -209,7 +341,7 @@
       ? UI.field('Screen', UI.select(p, 'display', [['', 'The main screen'], ...S.displays.map((d) => [d.id, `${d.label}${d.primary ? ' (main)' : ''} · ${d.pixels.width}×${d.pixels.height}`])], { onChange: () => { save(); S.apply(); } }))
       : null;
     return UI.section('Profile',
-      UI.lead('A profile is a set of zones, usually one per game. Switch between them here or with the Next profile hotkey.'),
+      UI.lead('A profile is a set of zones, usually one per game. Give it the game’s program and it’s used by itself when the game comes up, or switch here or with the Next profile hotkey.'),
       UI.row(
         UI.field('Profile in use', UI.select(cfg, 'profile', cfg.profiles.map((x) => [x.id, `${x.name} (${x.zones.length})`]), { onChange: () => { save(); S.apply({ keys: true }); } })),
         displays,
@@ -233,6 +365,7 @@
           const copy = Bot.clone(p);
           copy.id = Bot.uid('p');
           copy.name = `${p.name} (copy)`.slice(0, 60);
+          copy.apps = [];   // the programs stay with the original
           for (const z of copy.zones) z.id = Bot.uid('z');
           cfg.profiles.push(copy);
           cfg.profile = copy.id;
@@ -245,7 +378,8 @@
           cfg.profile = cfg.profiles[0].id;
           save();
           S.apply({ keys: true });
-        }, { cls: 'btn small danger' }) : null));
+        }, { cls: 'btn small danger' }) : null),
+      appsBlock(p));
   }
 
   function zonesSection() {
@@ -281,7 +415,7 @@
             String(i + 1),
             UI.toggle(z, 'enabled', `${z.name} is on`, () => S.apply()),
             h('span', {}, z.color ? h('span', { class: 'sr-swatch', 'aria-hidden': 'true', style: `background:${z.color}` }) : null, z.name),
-            MODE_SHORT[z.mode] || z.mode,
+            `${MODE_SHORT[z.mode] || z.mode}${String(z.only || '').trim() ? ', only matches' : ''}`,
             voiceLabel(z.voice),
             h('span', { class: 'hint', 'data-sr-last': z.id }, S.last.has(z.id) ? UI.trim(S.last.get(z.id).text, 60) : '–'),
             h('span', { class: 'bot-row-actions' },

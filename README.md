@@ -292,6 +292,18 @@ ways in, all under *Accessibility → Screen reader*:
   | Highlighted line | Menus, dialogue choices | The line that stands out by colour or brightness, each time it moves |
   | When I ask | Anything | Only with its number key or *Read now* |
 
+  A zone can *leave out* words, or *only read* text that matches: a word such as
+  your name, or a regular expression (`/whispers:/i`). A zone over a game's chat
+  can then read only the messages that mention you. The zone editor has
+  ready-made rules (whispers, party, raid and guild chat in WoW, questions), a
+  box to try a line against them, and a link to [regex101.com](https://regex101.com/)
+  for building your own.
+
+  Each profile can be given the programs it's for (e.g. `eldenring.exe`, picked
+  from the open programs or typed in). When one of them comes to the front, its
+  profile is used by itself and its name is said; any other program, like chat
+  or Discord, leaves the profile as it is.
+
 - **Reading cursor.** Hotkeys that work inside the game. `Ctrl+Alt+C` (`⌃⌥C`)
   reads the text nearest the middle of the screen, where the crosshair is: the
   game's equivalent of hovering. `Ctrl+Alt+↓`/`↑` step through the lines on
@@ -574,6 +586,6 @@ For system voices, Microsoft Edge offers the most natural free options, the "…
 - `desktop/import-main.js`: reading Firebot and Mix It Up data (JSON, NeDB, SQLite, zip backups) for the importer
 - `desktop/bot/`: the bot itself, loaded into the page by the desktop app only — Twitch login and API (`twitch.js`), EventSub (`eventsub.js`), `$variables` (`variables.js`), effects (`effects.js`), commands, events and timers (`triggers.js`), viewers, points, games and moderation (`community.js`), OBS (`obs.js`), the multistream relay (`relay.js`), importing from other bots (`importers.js`), the controls and tabs (`ui.js`, `ui-tabs.js`, `ui-multistream.js`), the Dashboard's side column (`dashboard.js`), where the reader and the bot meet (`integrations.js`) and the window's sections (`shell.js`)
 - `desktop/overlay/`: the OBS overlay page
-- `desktop/screen-main.js`, `desktop/screen/`: the screen reader's main-process side — screen capture without a picker, the text recognition helpers (`ocr-mac.js` for Apple Vision, `ocr-win.ps1` for Windows OCR), and the windows over the game: the zone editor and outlines (`overlay.*`) and the lens (`lens.*`); `desktop/bot/screen.js` and `ui-screen.js` are its page side
+- `desktop/screen-main.js`, `desktop/screen/`: the screen reader's main-process side — screen capture without a picker, the text recognition helpers (`ocr-mac.js` for Apple Vision, `ocr-win.ps1` for Windows OCR), the helpers that notice which program is in front (`apps-mac.js`, `apps-win.ps1`), and the windows over the game: the zone editor and outlines (`overlay.*`) and the lens (`lens.*`); `desktop/bot/screen.js` and `ui-screen.js` are its page side
 - `docs/bot-plan.md`: how the bot is put together, and why
 - `.github/workflows/desktop.yml`: builds the desktop binaries and publishes them on a `v*` tag
