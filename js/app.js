@@ -30,6 +30,7 @@ const DEFAULTS = {
   collapseNames: true,
   quoteParent: false,
   readEvents: true,
+  readAnnouncements: true, // Twitch /announce messages from mods and the streamer
   readEmojis: false,
   emoteMode: 'skip-all', // skip-all | skip-twitch | read
   readEmoteOnly: true,   // a message with nothing but emotes: read their names
@@ -78,7 +79,7 @@ const NUMBER_SETTINGS = ['maxLength', 'catchUp', 'cheerPriority', 'cheerEffects'
 const TEXT_SETTINGS = ['replayStartText', 'replayEndText'];
 const CHECKBOX_SETTINGS = [
   ...APPEARANCE_SETTINGS, 'announce',
-  'varyVoices', 'collapseNames', 'quoteParent', 'readEvents', 'readEmojis',
+  'varyVoices', 'collapseNames', 'quoteParent', 'readEvents', 'readAnnouncements', 'readEmojis',
   'skipCommands', 'skipLinks', 'replayAnnounce',
   'cheerAnnounce', 'highlightPriority', 'voiceConfirm',
 ];
@@ -360,6 +361,7 @@ function filterReason(entry) {
   const botReason = host.skipReason && host.skipReason(entry);
   if (botReason) return botReason;
   if (entry.kind === 'event' && !settings.readEvents) return 'events off';
+  if (entry.kind === 'announcement' && !settings.readAnnouncements) return 'announcements off';
   if (entry.kind === 'chat') {
     if (isIgnored(entry.login)) return 'ignored';
     if (settings.skipCommands && /^\s*!/.test(entry.rawText)) return 'command';
@@ -2773,6 +2775,7 @@ const SETTING_CHECKS = {
   collapseNames: accept.bool,
   quoteParent: accept.bool,
   readEvents: accept.bool,
+  readAnnouncements: accept.bool,
   readEmojis: accept.bool,
   emoteMode: accept.oneOf('skip-all', 'skip-twitch', 'read'),
   readEmoteOnly: accept.bool,
