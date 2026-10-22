@@ -67,6 +67,9 @@ const DEFAULTS = {
   modCommand: '!tts',
   modCommandWho: 'mods',
   rewards: {},           // channel points reward id -> { name, action }
+  // Twitch collabs (Shared Chat), per channel being read: whose chats to read.
+  // mode: all | own | pick; `muted` are the room ids left out when picking.
+  sharedChat: {},        // twitch login -> { mode, muted: [roomId] }
 };
 
 // Switches that are one checkbox each, in the order they appear on the page.
@@ -93,6 +96,7 @@ function loadSettings() {
       userVoices: { kokoro: {}, system: {}, ...(saved.userVoices || {}) },
       nicknames: { ...(saved.nicknames || {}) },
       rewards: { ...(saved.rewards || {}) },
+      sharedChat: { ...(saved.sharedChat || {}) },
       // Before several chats could be read there was one Twitch channel.
       sources: Array.isArray(saved.sources) ? saved.sources : saved.channel ? [{ platform: 'twitch', input: saved.channel }] : [],
       presets: Array.isArray(saved.presets) ? saved.presets : [],
@@ -950,7 +954,9 @@ function entryFromUserNotice(msg) {
     emotesTag: tags.emotes,
     displayText: text,
   };
-  if (tags['msg-id'] === 'announcement') return { ...base, kind: 'announcement' };
+  // In a collab, a notice from a partner's chat is wrapped as "sharedchatnotice".
+  const kind = tags['msg-id'] === 'sharedchatnotice' ? tags['source-msg-id'] : tags['msg-id'];
+  if (kind === 'announcement') return { ...base, kind: 'announcement' };
   return { ...base, kind: 'event', systemText: tags['system-msg'] || '' };
 }
 
@@ -964,7 +970,9 @@ function entryFromUserNotice(msg) {
 
 // `chat` is the top-bar chat it came in on; the test button leaves it out.
 function handlePrivmsg(msg, chat) {
+  if (chat && !takeShared(chat, msg)) return;
   const entry = withSource(entryFromPrivmsg(msg), chat);
+  entry.sharedRoomId = partnerRoomOf(msg);
   if (entry.bits) applyCheer(entry);
   if (entry.rewardId) applyReward(entry);
   if (entry.highlighted && settings.highlightPriority) entry.priority = true;
@@ -1278,18 +1286,23 @@ const PLACEHOLDERS = { twitch: 'Channel or twitch.tv link', youtube: '@handle or
 const addablePlatforms = () => (RemoteChat.available ? ['twitch', 'youtube', 'tiktok'] : ['twitch']);
 
 function createChat(platform, input = '') {
-  const chat = { id: `c${++chatSeq}`, platform, input, state: 'idle', text: '', roomId: null };
+  const chat = { id: `c${++chatSeq}`, platform, input, state: 'idle', text: '', roomId: null, shared: new Map() };
   if (platform === 'twitch') {
     chat.emotes = new ThirdPartyEmotes(emotesChanged);
     chat.client = new TwitchChat({
       onStatus: (state, text) => renderConnection(chat, state, text),
       onMessage: (msg) => handlePrivmsg(msg, chat),
       onUserNotice: (msg) => {
+        if (!takeShared(chat, msg)) return;
         const entry = withSource(entryFromUserNotice(msg), chat);
+        entry.sharedRoomId = partnerRoomOf(msg);
         entry.speechBody = entrySpeechBody(entry);
         enqueue(entry);
       },
-      onRoomState: (roomId) => loadThirdPartyEmotes(chat, roomId),
+      onRoomState: (roomId) => {
+        if (roomId !== chat.roomId) resetShared(chat);
+        loadThirdPartyEmotes(chat, roomId);
+      },
       onClearChat: (userId) => removeChatterMessages(chat, userId),
       onDeleteMessage: removeMessage,
     });
@@ -1347,6 +1360,230 @@ function removeMessage(id) {
     if (shown && shown.status !== 'done' && shown.status !== 'speaking') setStatus(shown, 'deleted', 'deleted by mod');
   }
 }
+
+// ---------------------------------------------------------------------------
+// Twitch collabs (Shared Chat)
+// ---------------------------------------------------------------------------
+
+// While streamers share their chats, Twitch sends each of them the messages
+// of every chat in the session, each marked with the room it was written in
+// (`source-room-id`). Per channel in the top bar, the streamer picks whose
+// chats get read: all of them, only that channel's own, or a few.
+const SHARED_MODES = ['all', 'own', 'pick'];
+// Room id -> "#login". Kept across chats: a partner's name doesn't change.
+const sharedNames = new Map();
+const sharedLookups = new Set();
+// One message reaches every collab channel in the top bar; read it once.
+const sharedSeen = new Set();
+
+const sharedName = (roomId) => sharedNames.get(roomId) || 'collab chat';
+
+// The partner's room a message was written in; null for the channel's own.
+function partnerRoomOf(msg) {
+  const from = msg.tags['source-room-id'];
+  return from && from !== msg.tags['room-id'] ? from : null;
+}
+
+function sharedPrefs(chat) {
+  const prefs = chat.client.channel && settings.sharedChat[chat.client.channel];
+  return prefs && SHARED_MODES.includes(prefs.mode) ? prefs : { mode: 'all', muted: [] };
+}
+
+function setSharedPrefs(chat, mode, muted = sharedPrefs(chat).muted) {
+  const login = chat.client.channel;
+  if (!login) return;
+  if (mode === 'all' && !muted.length) delete settings.sharedChat[login];
+  else settings.sharedChat[login] = { mode, muted: [...new Set(muted)].slice(0, 50) };
+  saveSettings();
+  renderSharedButton(chat);
+  updateSharedPanel(chat);
+}
+
+function sharedAllowed(chat, part) {
+  const prefs = sharedPrefs(chat);
+  if (prefs.mode === 'own') return part.own;
+  if (prefs.mode === 'pick') return !prefs.muted.includes(part.roomId);
+  return true;
+}
+
+function resetShared(chat) {
+  chat.shared = new Map();
+  closeSharedPanel(chat);
+  if (chat.sharedPanel) { chat.sharedPanel.remove(); chat.sharedPanel = null; }
+  renderSharedButton(chat);
+}
+
+// Notes who is in the collab, and says whether this message should be read.
+function takeShared(chat, msg) {
+  const tags = msg.tags;
+  const own = tags['room-id'];
+  const from = tags['source-room-id'];
+  if (!from || !own) return true;
+
+  let added = false;
+  for (const roomId of new Set([own, from])) {
+    if (chat.shared.has(roomId)) continue;
+    chat.shared.set(roomId, { roomId, own: roomId === own, read: 0, skipped: 0 });
+    added = true;
+  }
+  if (!sharedNames.has(own) && chat.client.channel) sharedNames.set(own, `#${chat.client.channel}`);
+  learnSharedName(from, msg);
+
+  const part = chat.shared.get(from);
+  const allowed = sharedAllowed(chat, part);
+  const key = tags['source-id'];
+  if (allowed && key) {
+    if (sharedSeen.has(key)) return false;
+    sharedSeen.add(key);
+    if (sharedSeen.size > 2000) sharedSeen.delete(sharedSeen.values().next().value);
+  }
+  if (allowed) part.read++;
+  else part.skipped++;
+
+  if (added) {
+    renderSharedButton(chat);
+    if (chat.sharedPanel) buildSharedPanel(chat);
+  } else {
+    updateSharedCounts(chat, part);
+  }
+  return allowed;
+}
+
+// The streamer writing in their own chat gives the name away; anyone else
+// needs a lookup, from a public API that needs no key.
+function learnSharedName(roomId, msg) {
+  if (sharedNames.has(roomId)) return;
+  const login = (msg.tags.login || msg.prefix.split('!')[0] || '').toLowerCase();
+  if (/(^|,)broadcaster\//.test(msg.tags['source-badges'] || '') && login) {
+    setSharedName(roomId, login);
+    return;
+  }
+  if (sharedLookups.has(roomId)) return;
+  sharedLookups.add(roomId);
+  fetch(`https://api.ivr.fi/v2/twitch/user?id=${encodeURIComponent(roomId)}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      const user = Array.isArray(data) ? data[0] : null;
+      if (user && typeof user.login === 'string') setSharedName(roomId, user.login.toLowerCase());
+    })
+    .catch(() => {});
+}
+
+function setSharedName(roomId, login) {
+  if (!LOGIN_RE.test(login)) return;
+  sharedNames.set(roomId, `#${login}`);
+  for (const e of feedEntries) if (e.sharedRoomId === roomId && e.sharedEl) e.sharedEl.textContent = `#${login}`;
+  for (const chat of chats) {
+    if (!chat.shared || !chat.shared.has(roomId)) continue;
+    renderSharedButton(chat);
+    if (chat.sharedPanel) buildSharedPanel(chat);
+  }
+}
+
+// The button in the channel's field, there only while a collab is going on.
+function renderSharedButton(chat) {
+  const btn = chat.sharedBtn;
+  if (!btn) return;
+  const parts = [...chat.shared.values()];
+  const collab = parts.some((p) => !p.own);
+  btn.hidden = !collab;
+  if (!collab) return;
+  const reading = parts.filter((p) => sharedAllowed(chat, p)).length;
+  const mode = sharedPrefs(chat).mode;
+  const short = mode === 'own' ? 'own chat' : reading === parts.length ? `all ${parts.length}` : `${reading} of ${parts.length}`;
+  btn.textContent = `Collab · ${short}`;
+  btn.dataset.mode = mode;
+  btn.title = `#${chat.client.channel} shares its chat with ${parts.length - 1} other channel${parts.length > 2 ? 's' : ''}. Pick whose messages are read.`;
+}
+
+function buildSharedPanel(chat) {
+  const channel = `#${chat.client.channel}`;
+  const parts = [...chat.shared.values()].sort((a, b) => (b.own - a.own) || sharedName(a.roomId).localeCompare(sharedName(b.roomId)));
+  const radio = (mode, text) => el('label', { class: 'check' },
+    el('input', { type: 'radio', name: `shared-mode-${chat.id}`, value: mode, onchange: () => setSharedPrefs(chat, mode) }),
+    ` ${text}`);
+  const rows = parts.map((part) => {
+    part.countEl = el('span', { class: 'shared-count' });
+    const box = el('input', {
+      type: 'checkbox',
+      'data-room': part.roomId,
+      onchange: (e) => toggleSharedRoom(chat, part, e.target.checked),
+    });
+    return el('li', {},
+      el('label', { class: 'check' }, box, ' ', sharedName(part.roomId), part.own ? el('span', { class: 'shared-own' }, ' (this channel)') : null),
+      part.countEl);
+  });
+  const panel = el('div', { class: 'popover shared-panel', role: 'dialog', 'aria-label': `Collab chats for ${channel}` },
+    el('p', { class: 'shared-head' }, `${channel} is sharing its chat with ${parts.length - 1} other channel${parts.length > 2 ? 's' : ''}. Read messages from:`),
+    el('div', { class: 'shared-modes', role: 'radiogroup', 'aria-label': 'Whose messages to read' },
+      radio('all', 'Every chat in the collab'),
+      radio('own', `Only ${channel}’s own chat`),
+      radio('pick', 'Only the chats ticked below')),
+    el('ul', { class: 'shared-list', 'aria-label': 'Chats in the collab' }, rows),
+    el('p', { class: 'hint' }, 'Messages from chats that are left out are dropped before they reach the queue, chat commands included. The choice is remembered for this channel.'),
+  );
+  panel.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeSharedPanel(chat, { focus: true }); }
+  });
+  const wasOpen = chat.sharedPanel && !chat.sharedPanel.hidden;
+  if (chat.sharedPanel) chat.sharedPanel.replaceWith(panel);
+  else chat.field.append(panel);
+  chat.sharedPanel = panel;
+  panel.hidden = !wasOpen;
+  updateSharedPanel(chat);
+}
+
+// Ticking a box always means picking by hand, starting from what's read now.
+function toggleSharedRoom(chat, part, on) {
+  const muted = [...chat.shared.values()].filter((p) => !sharedAllowed(chat, p)).map((p) => p.roomId);
+  const keep = sharedPrefs(chat).muted.filter((id) => !chat.shared.has(id));
+  const next = on ? muted.filter((id) => id !== part.roomId) : [...muted, part.roomId];
+  setSharedPrefs(chat, 'pick', [...keep, ...next]);
+}
+
+function updateSharedPanel(chat) {
+  const panel = chat.sharedPanel;
+  if (!panel) return;
+  const mode = sharedPrefs(chat).mode;
+  for (const input of panel.querySelectorAll('input[type="radio"]')) input.checked = input.value === mode;
+  for (const input of panel.querySelectorAll('input[type="checkbox"]')) {
+    const part = chat.shared.get(input.dataset.room);
+    if (part) input.checked = sharedAllowed(chat, part);
+  }
+  for (const part of chat.shared.values()) updateSharedCounts(chat, part);
+}
+
+function updateSharedCounts(chat, part) {
+  if (!part.countEl || !chat.sharedPanel || chat.sharedPanel.hidden) return;
+  const bits = [];
+  if (part.read) bits.push(`${part.read.toLocaleString()} read`);
+  if (part.skipped) bits.push(`${part.skipped.toLocaleString()} left out`);
+  part.countEl.textContent = bits.join(' · ');
+}
+
+function openSharedPanel(chat) {
+  for (const other of chats) if (other !== chat) closeSharedPanel(other);
+  buildSharedPanel(chat);
+  chat.sharedPanel.hidden = false;
+  updateSharedPanel(chat);
+  chat.sharedBtn.setAttribute('aria-expanded', 'true');
+  const current = chat.sharedPanel.querySelector('input[type="radio"]:checked');
+  if (current) current.focus();
+}
+
+function closeSharedPanel(chat, { focus = false } = {}) {
+  if (!chat.sharedPanel || chat.sharedPanel.hidden) return;
+  chat.sharedPanel.hidden = true;
+  if (chat.sharedBtn) {
+    chat.sharedBtn.setAttribute('aria-expanded', 'false');
+    if (focus) chat.sharedBtn.focus();
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.isConnected) return;
+  for (const chat of chats) if (chat.field && !chat.field.contains(e.target)) closeSharedPanel(chat);
+});
 
 // ---------------------------------------------------------------------------
 // YouTube and TikTok → entries (desktop app only, see js/sources.js)
@@ -1463,6 +1700,7 @@ function addToFeed(entry) {
   const label = entry.label || { event: 'Event', notice: 'Reader' }[entry.kind];
   const meta = el('div', { class: 'meta' },
     platformTag(entry),
+    entry.sharedRoomId ? (entry.sharedEl = el('span', { class: 'platform shared-from', 'data-platform': 'twitch', title: 'Written in a collab partner’s chat' }, sharedName(entry.sharedRoomId))) : null,
     label ? el('span', { class: 'reply-to' }, label) : name,
     entry.kind === 'announcement' ? el('span', { class: 'reply-to' }, 'announcement') : null,
     badges.map((b) => el('span', { class: 'badge' }, b)),
@@ -2547,6 +2785,9 @@ const SETTING_CHECKS = {
   modCommand: (v) => (typeof v === 'string' && v.length <= 60 ? cleanCommand(v) : undefined),
   modCommandWho: accept.oneOf('mods', 'vips', 'off'),
   rewards: acceptRewards,
+  sharedChat: accept.logins(200, (v) => (v && typeof v === 'object' && SHARED_MODES.includes(v.mode)
+    ? { mode: v.mode, muted: (Array.isArray(v.muted) ? v.muted : []).filter((id) => typeof id === 'string' && /^\d{1,20}$/.test(id)).slice(0, 50) }
+    : undefined)),
 };
 
 function acceptChatList(value) {
@@ -2672,11 +2913,23 @@ function chatField(chat) {
     'aria-label': `Remove this ${name} chat`,
     onclick: () => removeChat(chat),
   }, '×');
+  if (chat.platform === 'twitch') {
+    chat.sharedBtn = el('button', {
+      type: 'button',
+      class: 'source-collab',
+      hidden: true,
+      'aria-haspopup': 'dialog',
+      'aria-expanded': 'false',
+      onclick: () => (chat.sharedPanel && !chat.sharedPanel.hidden ? closeSharedPanel(chat) : openSharedPanel(chat)),
+    });
+  }
   chat.field = el('div', { class: 'source-field', 'data-platform': chat.platform, 'data-state': chat.state },
     el('label', { class: 'source-tag', for: inputId }, el('span', { class: 'dot', 'aria-hidden': 'true' }), name),
     chat.inputEl,
+    chat.sharedBtn || null,
     chat.removeBtn,
   );
+  renderSharedButton(chat);
   return chat.field;
 }
 
@@ -2797,6 +3050,7 @@ function connectChats({ toggle = true } = {}) {
       continue;
     }
     if (change.chat.platform === 'twitch') {
+      resetShared(change.chat);
       change.chat.input = change.target;
       change.chat.inputEl.value = change.target;
     }

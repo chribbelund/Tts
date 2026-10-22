@@ -236,6 +236,33 @@ kbd {
 .connect input:focus-visible { outline: none; }
 /* The × that takes YouTube or TikTok away again. */
 .source-remove { margin-right: 4px; }
+/* Shown in a Twitch field while its channel is in a collab (Shared Chat). */
+.source-field { position: relative; }
+.source-collab {
+  flex: none;
+  margin-right: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.source-collab[hidden] { display: none; }
+.source-collab:hover, .source-collab[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.source-collab:not([data-mode="all"]) { border-color: var(--accent); color: var(--accent); }
+.shared-panel { width: min(340px, calc(100vw / var(--ui-zoom) - 24px)); padding: 10px 12px; display: grid; gap: 8px; }
+.shared-head { margin: 0; font-size: 13px; font-weight: 600; }
+.shared-modes { display: grid; gap: 6px; }
+.shared-list { list-style: none; margin: 0; padding: 8px 0 0; border-top: 1px solid var(--line); display: grid; gap: 6px; max-height: 40vh; overflow-y: auto; }
+.shared-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.shared-own, .shared-count { color: var(--muted); font-size: 12px; }
+.shared-count { white-space: nowrap; }
+.shared-panel .hint { margin: 0; }
 .source-add { position: relative; display: flex; }
 .add-btn { display: grid; place-items: center; padding: 0 10px; }
 .add-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
