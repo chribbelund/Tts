@@ -98,6 +98,66 @@
   }
 
   // -------------------------------------------------------------------------
+  // Only read what matches
+  // -------------------------------------------------------------------------
+
+  const REGEX_SITE = 'https://regex101.com/';
+
+  // Ready-made rules. `ask` asks for the word instead.
+  const ONLY_SUGGESTIONS = [
+    { label: 'My name, or another word (asks which)', ask: true },
+    { label: 'Whispers to me (WoW: “[Name] whispers: …”)', rule: '/whispers:/i' },
+    { label: 'Party and raid chat (WoW)', rule: '/^\\[(party|party leader|raid|raid leader|raid warning)\\]/i' },
+    { label: 'Guild chat (WoW)', rule: '/^\\[(guild|officer)\\]/i' },
+    { label: 'Any of several words (change the words after)', rule: '/\\b(help|heal|inc)\\b/i' },
+    { label: 'Questions (lines ending in ?)', rule: '/\\?\\s*$/' },
+  ];
+
+  function onlyField(z, rebuild) {
+    const bad = h('p', { class: 'warn', role: 'status' });
+    const tryOut = h('span', { class: 'hint', role: 'status' });
+    const sample = { v: '' };
+    const check = () => {
+      const rule = S.badRule(z.only);
+      bad.textContent = rule ? `“${rule}” isn’t a working regular expression, so it’s left out.` : '';
+      bad.hidden = !rule;
+      if (!sample.v.trim()) { tryOut.textContent = ''; return; }
+      tryOut.textContent = S.allowed(z, sample.v) ? '✓ Would be read' : '✗ Would not be read';
+    };
+    const add = (rule) => {
+      const lines = String(z.only || '').split('\n').map((l) => l.trim()).filter(Boolean);
+      if (!lines.includes(rule)) lines.push(rule);
+      z.only = lines.join('\n');
+      rebuild();
+    };
+    const suggest = UI.select({ v: '' }, 'v', [['', '+ Add a suggestion…'], ...ONLY_SUGGESTIONS.map((x, i) => [String(i), x.label])], {
+      label: 'Add a suggestion',
+      onChange: (v) => {
+        if (v === '') return;
+        const pick = ONLY_SUGGESTIONS[Number(v)];
+        if (!pick.ask) { add(pick.rule); return; }
+        const word = prompt('Which word? Lines with it are read, in any case. Your name, for example:', '');
+        if (word && word.trim()) add(word.trim().slice(0, 100));
+        else rebuild();
+      },
+    });
+    const sampleInput = UI.text(sample, 'v', { placeholder: 'e.g. [Guild] [Thrall]: hi Chris, need a heal?', onChange: check });
+    sampleInput.setAttribute('aria-label', 'A line to try the rules on');
+    check();
+    return h('div', { class: 'field nested' },
+      h('div', { class: 'row-label' }, 'Only read'),
+      UI.text(z, 'only', { multiline: true, rows: 3, placeholder: 'Empty reads everything. One per line, e.g.\nChris\n/whispers:/i', onChange: check }),
+      h('p', { class: 'hint' },
+        'When this has something in it, only text with one of these lines in it is read: in a chat box, only the messages that mention your name. ',
+        'A plain word matches in any case. /…/ is a regular expression; ',
+        h('a', { href: REGEX_SITE, target: '_blank', rel: 'noopener' }, 'regex101.com'),
+        ' is a good place to build and try one (pick the ECMAScript/JavaScript flavour). ',
+        'In a chat box each line is checked on its own, so the second line of a long message that wraps is read only if it matches too.'),
+      bad,
+      UI.row(suggest, UI.field('Try a line', sampleInput), tryOut));
+  }
+
+  // -------------------------------------------------------------------------
   // Editing one zone
   // -------------------------------------------------------------------------
 
@@ -123,6 +183,7 @@
             UI.field('Wait for it to settle (ms)', UI.number(z, 'settle', { min: 0, max: 5000, step: 50 }), 'Text being typed out or fading in is read once it stops changing.')),
           UI.field('Say first', UI.text(z, 'prefix', { placeholder: 'e.g. Objective', maxlength: 40 }), 'Said before the text, to tell zones in the same voice apart. Leave empty to say only the text.'),
           UI.field('Leave out', UI.text(z, 'ignore', { multiline: true, rows: 3, placeholder: 'One per line, e.g.\n[E]\n/\\d+ m$/' }), 'Words or phrases never read from this box, one per line. /…/ is a regular expression.'),
+          onlyField(z, rebuild),
           h('div', { class: 'field nested' },
             h('div', { class: 'row-label' }, 'Where on the screen (% of its width and height)'),
             UI.row(pos('x', 'From the left'), pos('y', 'From the top'), pos('w', 'Width'), pos('h', 'Height')),
@@ -354,7 +415,7 @@
             String(i + 1),
             UI.toggle(z, 'enabled', `${z.name} is on`, () => S.apply()),
             h('span', {}, z.color ? h('span', { class: 'sr-swatch', 'aria-hidden': 'true', style: `background:${z.color}` }) : null, z.name),
-            MODE_SHORT[z.mode] || z.mode,
+            `${MODE_SHORT[z.mode] || z.mode}${String(z.only || '').trim() ? ', only matches' : ''}`,
             voiceLabel(z.voice),
             h('span', { class: 'hint', 'data-sr-last': z.id }, S.last.has(z.id) ? UI.trim(S.last.get(z.id).text, 60) : '–'),
             h('span', { class: 'bot-row-actions' },

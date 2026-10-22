@@ -292,6 +292,13 @@ ways in, all under *Accessibility → Screen reader*:
   | Highlighted line | Menus, dialogue choices | The line that stands out by colour or brightness, each time it moves |
   | When I ask | Anything | Only with its number key or *Read now* |
 
+  A zone can *leave out* words, or *only read* text that matches: a word such as
+  your name, or a regular expression (`/whispers:/i`). A zone over a game's chat
+  can then read only the messages that mention you. The zone editor has
+  ready-made rules (whispers, party, raid and guild chat in WoW, questions), a
+  box to try a line against them, and a link to [regex101.com](https://regex101.com/)
+  for building your own.
+
   Each profile can be given the programs it's for (e.g. `eldenring.exe`, picked
   from the open programs or typed in). When one of them comes to the front, its
   profile is used by itself and its name is said; any other program, like chat

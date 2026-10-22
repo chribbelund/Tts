@@ -25,7 +25,9 @@
 //   { id, name, enabled, rect: { x, y, w, h },
 //     mode: changes | new-lines | menu | manual,
 //     voice: { engine: '' | 'system' | 'kokoro', voiceId, rate, pitch, volume },
-//     interrupt: self | all | none, settle (ms), prefix, ignore, color }
+//     interrupt: self | all | none, settle (ms), prefix, ignore, only, color }
+//   ignore: words or /regex/ taken out of the text, one per line
+//   only:   when set, only text matching one of these (one per line) is read
 
 (() => {
   const desktop = window.chatReaderDesktop && window.chatReaderDesktop.screen;
@@ -72,7 +74,7 @@
   const ZONE_DEFAULTS = {
     name: 'Zone', enabled: true, rect: { x: 0.3, y: 0.4, w: 0.4, h: 0.2 }, mode: 'changes',
     voice: { engine: '', voiceId: '', rate: 1, pitch: 1, volume: 100 },
-    interrupt: 'self', settle: 350, prefix: '', ignore: '', color: '',
+    interrupt: 'self', settle: 350, prefix: '', ignore: '', only: '', color: '',
   };
 
   const KEY_ACTIONS = [
@@ -128,6 +130,8 @@
     if (!MODES.some(([m]) => m === zone.mode)) zone.mode = 'changes';
     if (!INTERRUPTS.some(([m]) => m === zone.interrupt)) zone.interrupt = 'self';
     zone.settle = clamp(Math.round(Number(zone.settle) || 350), 0, 5000);
+    zone.ignore = String(zone.ignore || '').slice(0, 2000);
+    zone.only = String(zone.only || '').slice(0, 2000);
     delete zone.isNew;
     return zone;
   }
@@ -453,13 +457,31 @@
   }
   S.similarity = similarity;
 
-  function ignoreRules(zone) {
-    return String((zone && zone.ignore) || '').split('\n').map((l) => l.trim()).filter(Boolean).map((rule) => {
+  // One rule per line: a plain word or phrase (any case), or /…/flags.
+  // `global` is for replacing; testing needs it off, or test() keeps a place.
+  function rules(text, global) {
+    return String(text || '').split('\n').map((l) => l.trim()).filter(Boolean).map((rule) => {
       const re = /^\/(.+)\/([a-z]*)$/i.exec(rule);
-      if (re) { try { return new RegExp(re[1], re[2].includes('g') ? re[2] : `${re[2]}g`); } catch { return null; } }
-      return new RegExp(rule.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+      if (re) {
+        const flags = re[2].replace(/g/g, '') + (global ? 'g' : '');
+        try { return new RegExp(re[1], flags); } catch { return null; }
+      }
+      return new RegExp(rule.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), global ? 'gi' : 'i');
     }).filter(Boolean);
   }
+  const ignoreRules = (zone) => rules(zone && zone.ignore, true);
+
+  // Whether a zone's "Only read" rules let this text through.
+  S.allowed = (zone, text) => {
+    const only = rules(zone && zone.only, false);
+    return !only.length || only.some((re) => re.test(text));
+  };
+  // A rule as typed that isn't a working regular expression, for the editor.
+  S.badRule = (text) => String(text || '').split('\n').map((l) => l.trim()).find((rule) => {
+    const re = /^\/(.+)\/([a-z]*)$/i.exec(rule);
+    if (!re) return false;
+    try { new RegExp(re[1], re[2].replace(/g/g, '')); return false; } catch { return true; }
+  }) || '';
 
   // Top to bottom, then left to right within a row.
   function readingOrder(lines) {
@@ -744,10 +766,13 @@
     });
   }
 
-  function speakZone(zone, text, rect, { interrupt = zone.interrupt } = {}) {
+  // `full` is the whole text when only the end of it is said (typed out).
+  function speakZone(zone, text, rect, { interrupt = zone.interrupt, full = text } = {}) {
+    if (!S.allowed(zone, full)) return false;
     const said = zone.prefix ? `${zone.prefix}: ${text}` : text;
     S.last.set(zone.id, { text, at: Date.now() });
     say({ text: said, voice: zone.voice, zone: zone.id, rect: rect || zone.rect, interrupt });
+    return true;
   }
 
   function handleZoneText(zone, st, lines) {
@@ -770,7 +795,7 @@
       st.lastNorm = norm;
       st.lastText = text;
       st.recent.push({ norm, at: now });
-      speakZone(zone, speakText, union(lines.map((l) => l.box)), { interrupt: speakText === text ? zone.interrupt : 'none' });
+      speakZone(zone, speakText, union(lines.map((l) => l.box)), { interrupt: speakText === text ? zone.interrupt : 'none', full: text });
     } else if (zone.mode === 'new-lines') {
       const norms = lines.map((l) => comparable(l.text));
       const fresh = lines.filter((l, i) => norms[i] && !st.lines.some((p) => similarity(p, norms[i]) >= 0.85));
@@ -801,7 +826,9 @@
       st.lastNorm = comparable(text);
       st.lastText = text;
       if (!text) { say({ text: `Nothing to read in ${zone.name}.`, voice: zone.voice, zone: zone.id, rect: zone.rect, interrupt: 'all' }); return; }
-      speakZone(zone, text, union(clean_.map((l) => l.box)), { interrupt: 'all' });
+      if (!speakZone(zone, text, union(clean_.map((l) => l.box)), { interrupt: 'all' })) {
+        say({ text: `Nothing in ${zone.name} matches what it should read.`, voice: zone.voice, zone: zone.id, rect: zone.rect, interrupt: 'all' });
+      }
     } catch (err) {
       navSay(`Couldn’t read ${zone.name}: ${err.message}`);
     } finally {
