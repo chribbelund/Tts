@@ -99,6 +99,10 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
     editZones: (payload) => ipcRenderer.invoke('screen:edit', payload),
     setMarkers: (state) => ipcRenderer.send('screen:markers', state),
     setLens: (state) => ipcRenderer.send('screen:lens', state),
+    // Tells the page which program is in front ('app' events) while on.
+    watchApps: (on) => ipcRenderer.invoke('screen:watch-apps', !!on),
+    // The programs with a window open now, and the last one in front.
+    apps: () => ipcRenderer.invoke('screen:apps'),
     onEvent: (handler) => {
       const listener = (_event, payload) => handler(payload);
       ipcRenderer.on('screen:event', listener);

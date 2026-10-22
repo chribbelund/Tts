@@ -7,7 +7,9 @@
 //   Reading zones  Boxes on the screen, drawn once per game (a profile). Each
 //                  is watched, and its text is read out loud when it changes,
 //                  in a voice of its own: subtitles in one voice, the quest
-//                  log in another, the menu in a third.
+//                  log in another, the menu in a third. A profile can name
+//                  the programs it's for; it's picked by itself when one of
+//                  them comes to the front.
 //   Reading cursor Hotkeys that work inside the game: read the whole screen,
 //                  step to the next or previous line of text, to the one on
 //                  the left or right, or to the text in the middle of the
@@ -39,6 +41,7 @@
     last: new Map(),        // zone id -> { text, at } last thing read from it
     map: null,              // the reading cursor's text: { at, lines, index }
     speaking: null,         // { text, zone }
+    app: null,              // the program in front: { pid, exe, name, id, title }
   };
 
   const MODES = [
@@ -129,7 +132,51 @@
     return zone;
   }
 
-  S.newProfile = (name = 'My zones') => ({ id: uid('p'), name, display: '', zones: [] });
+  S.newProfile = (name = 'My zones') => ({ id: uid('p'), name, display: '', apps: [], zones: [] });
+
+  // -------------------------------------------------------------------------
+  // A profile for each program
+  // -------------------------------------------------------------------------
+
+  // "EldenRing.exe", "eldenring" and "Elden Ring.app" are the same program.
+  const appKey = (v) => String(v || '').trim().toLowerCase().replace(/\.(exe|app)$/, '');
+  S.appKey = appKey;
+
+  // What to save for a program: its file name on Windows (what the game's
+  // folder shows), its name on macOS.
+  S.appLabel = (app) => (window.chatReaderDesktop.platform === 'win32' ? app.exe || app.name : app.name || app.exe);
+
+  S.appMatches = (entry, app) => {
+    const want = appKey(entry);
+    return !!want && !!app && [app.exe, app.name, app.id].some((v) => appKey(v) === want);
+  };
+
+  S.profileForApp = (app) => cfg().profiles.find((p) => p.apps.some((a) => S.appMatches(a, app))) || null;
+
+  let watchingApps = null;
+  function syncAppWatch() {
+    // Also while the reader is on with no programs set yet, so the page can
+    // offer the game that was just in front.
+    const c = cfg();
+    const want = !!(desktop && desktop.watchApps && c.autoProfile && (c.enabled || c.profiles.some((p) => p.apps.length)));
+    if (want === watchingApps) return;
+    watchingApps = want;
+    desktop.watchApps(want).catch(() => { watchingApps = null; });
+  }
+
+  function onApp(app) {
+    S.app = app;
+    const c = cfg();
+    const p = c.autoProfile ? S.profileForApp(app) : null;
+    // A program without a profile leaves the one in use alone, so looking at
+    // chat or Discord for a moment doesn't change anything.
+    if (!p || p.id === c.profile) { changed(); return; }
+    c.profile = p.id;
+    Bot.save();
+    S.apply({ keys: true });
+    Bot.log('info', `Screen reader: ${app.name || app.exe} came to the front, using the profile “${p.name}”.`);
+    navSay(`Profile ${p.name}, ${countZones()}.`);
+  }
 
   function normalize() {
     const c = cfg();
@@ -138,6 +185,11 @@
       p.id = p.id || uid('p');
       p.name = String(p.name || 'Profile').slice(0, 60);
       p.display = String(p.display || '');
+      const seen = new Set();
+      p.apps = (Array.isArray(p.apps) ? p.apps : [])
+        .map((a) => String(a || '').trim().slice(0, 120))
+        .filter((a) => a && !seen.has(appKey(a)) && seen.add(appKey(a)))
+        .slice(0, 20);
       p.zones = (Array.isArray(p.zones) ? p.zones : []).slice(0, 50).map(normalizeZone);
     }
     if (!c.profiles.some((p) => p.id === c.profile)) c.profile = c.profiles[0].id;
@@ -1064,6 +1116,7 @@
     pushLens();
     if (running()) { if (!loopTimer) schedule(50); } else schedule();
     if (keys) host.syncHotkeys();
+    syncAppWatch();
     changed();
   };
 
@@ -1073,6 +1126,8 @@
     desktop.onEvent(({ type, payload }) => {
       if (type === 'say') navSay(payload);
       if (type === 'displays') { S.displays = payload || []; S.map = null; changed(); }
+      if (type === 'app' && payload) onApp(payload);
+      if (type === 'app-error') Bot.log('error', `Screen reader: ${payload}`);
     });
     try { S.displays = await desktop.displays(); } catch { S.displays = []; }
     await refreshAccess();

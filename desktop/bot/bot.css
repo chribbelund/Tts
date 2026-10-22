@@ -379,3 +379,5 @@ p.code-box { display: block; }
 .sr-keys-list { margin: 0.4em 0 0.8em; padding-left: 1.3em; line-height: 1.6; }
 .sr-keys-list kbd { white-space: nowrap; }
 .sr-voice .bot-range { min-width: 9em; }
+.sr-apps { display: flex; flex-wrap: wrap; gap: 0.4em; margin: 0.3em 0 0.6em; padding: 0; list-style: none; }
+.sr-apps li { display: inline-flex; align-items: center; gap: 0.3em; padding: 0.15em 0.2em 0.15em 0.6em; border: 1px solid var(--border, rgba(127, 127, 127, 0.35)); border-radius: 999px; }

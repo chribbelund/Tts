@@ -202,6 +202,77 @@
   }
   Bot.on('screen-live', drawLive);
 
+  // The open programs, once asked for. Kept here so a redraw doesn't lose them.
+  const appPick = { loading: false, list: null, error: '' };
+
+  function appsBlock(p) {
+    const cfg = c();
+    const same = (name) => (a) => S.appMatches(a, { exe: name, name });
+    const add = (raw) => {
+      const name = String(raw || '').trim().slice(0, 120);
+      if (!name) return;
+      // A program belongs to one profile, or which to use would be a guess.
+      for (const other of cfg.profiles) if (other !== p) other.apps = other.apps.filter((a) => !same(name)(a));
+      if (!p.apps.some(same(name))) p.apps.push(name);
+      save();
+      S.apply();
+    };
+    const remove = (a) => {
+      p.apps = p.apps.filter((x) => x !== a);
+      save();
+      S.apply();
+    };
+    const typed = { v: '' };
+    const input = UI.text(typed, 'v', { placeholder: IS_MAC ? 'e.g. Hades' : 'e.g. eldenring.exe', maxlength: 120 });
+    input.setAttribute('aria-label', 'Program name');
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(typed.v); } });
+    const owner = (app) => S.profileForApp(app);
+    const last = S.app;
+    const lastOwner = last && owner(last);
+
+    return h('div', { class: 'field nested' },
+      h('div', { class: 'row-label' }, 'Programs that use this profile'),
+      h('p', { class: 'hint' }, 'When one of these comes to the front, this profile is used by itself and its name is said. Any other program, like chat or Discord, leaves the profile as it is.'),
+      p.apps.length
+        ? h('ul', { class: 'sr-apps', 'aria-label': `Programs for ${p.name}` }, p.apps.map((a) => h('li', {},
+          h('span', {}, a),
+          UI.button('×', () => remove(a), { cls: 'x', aria: `Remove ${a}`, title: 'Remove' }))))
+        : h('p', { class: 'hint' }, 'None yet, so this profile is only picked by hand or with the Next profile hotkey.'),
+      last && (!lastOwner || lastOwner !== p) ? UI.row(
+        UI.button(`+ Add ${last.name || last.exe}`, () => add(S.appLabel(last)), { cls: 'btn small primary' }),
+        h('span', { class: 'hint' }, lastOwner ? `The program in front last. It’s in “${lastOwner.name}” now and moves here.` : 'The program in front last. Start the game, switch back here and add it.')) : null,
+      UI.row(
+        appPick.list
+          ? UI.select({ v: '' }, 'v', [
+            ['', appPick.list.length ? 'Pick an open program…' : 'No open programs found'],
+            ...appPick.list.map((a) => {
+              const extra = !IS_MAC && a.name && a.exe && S.appKey(a.name) !== S.appKey(a.exe) ? ` (${a.exe})` : '';
+              const where = owner(a);
+              return [S.appLabel(a), `${a.name || a.exe}${extra}${where ? ` · in “${where.name}”` : ''}`];
+            }),
+          ], { label: 'Open programs', onChange: (v) => add(v) })
+          : null,
+        UI.button(appPick.loading ? 'Looking…' : appPick.list ? 'Look again' : 'Choose from open programs…', async () => {
+          appPick.loading = true;
+          UI.rerender();
+          try {
+            const r = await window.chatReaderDesktop.screen.apps();
+            appPick.list = r.apps || [];
+            appPick.error = r.error || '';
+          } catch (err) {
+            appPick.list = [];
+            appPick.error = err.message;
+          } finally {
+            appPick.loading = false;
+            UI.rerender();
+          }
+        }, { disabled: appPick.loading }),
+        UI.field('Or type its name', input),
+        UI.button('Add', () => add(typed.v))),
+      appPick.error ? h('p', { class: 'warn' }, appPick.error) : null,
+      UI.check(cfg, 'autoProfile', 'Switch profile by itself when one of its programs comes to the front', { onChange: () => { save(); S.apply(); } }));
+  }
+
   function profileSection() {
     const cfg = c();
     const p = S.profile();
@@ -209,7 +280,7 @@
       ? UI.field('Screen', UI.select(p, 'display', [['', 'The main screen'], ...S.displays.map((d) => [d.id, `${d.label}${d.primary ? ' (main)' : ''} · ${d.pixels.width}×${d.pixels.height}`])], { onChange: () => { save(); S.apply(); } }))
       : null;
     return UI.section('Profile',
-      UI.lead('A profile is a set of zones, usually one per game. Switch between them here or with the Next profile hotkey.'),
+      UI.lead('A profile is a set of zones, usually one per game. Give it the game’s program and it’s used by itself when the game comes up, or switch here or with the Next profile hotkey.'),
       UI.row(
         UI.field('Profile in use', UI.select(cfg, 'profile', cfg.profiles.map((x) => [x.id, `${x.name} (${x.zones.length})`]), { onChange: () => { save(); S.apply({ keys: true }); } })),
         displays,
@@ -233,6 +304,7 @@
           const copy = Bot.clone(p);
           copy.id = Bot.uid('p');
           copy.name = `${p.name} (copy)`.slice(0, 60);
+          copy.apps = [];   // the programs stay with the original
           for (const z of copy.zones) z.id = Bot.uid('z');
           cfg.profiles.push(copy);
           cfg.profile = copy.id;
@@ -245,7 +317,8 @@
           cfg.profile = cfg.profiles[0].id;
           save();
           S.apply({ keys: true });
-        }, { cls: 'btn small danger' }) : null));
+        }, { cls: 'btn small danger' }) : null),
+      appsBlock(p));
   }
 
   function zonesSection() {
