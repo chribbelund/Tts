@@ -6,7 +6,7 @@ directories:
   buildResources: build
   output: dist
 
-# Only the shell, the bot (bot/, overlay/) and the copied page. electron-builder adds the production
+# Only the shell, the bot (bot/, overlay/), the screen reader (screen/) and the copied page. electron-builder adds the production
 # dependencies (the TikTok connector) from node_modules on its own.
 # build/icon.png is also read at runtime, for the tray and window icons.
 files:
@@ -17,6 +17,8 @@ files:
   - db-main.js
   - multistream-main.js
   - import-main.js
+  - screen-main.js
+  - screen/**/*
   - bot/**/*
   - overlay/**/*
   - sources/**/*

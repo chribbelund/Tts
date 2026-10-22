@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'">
+<title>Reading zones</title>
+<link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+<!-- Shown on top of a game by screen-main.js, in one of two roles:
+     markers  outlines of the zones and a box around what's being read; never takes input
+     editor   draw, move and resize the zones, by mouse or keyboard -->
+<div id="stage" class="stage"></div>
+
+<div id="toolbar" class="toolbar" role="dialog" aria-labelledby="tbTitle" hidden>
+  <div class="tb-row">
+    <h1 id="tbTitle">Reading zones</h1>
+    <button type="button" id="tbMove" class="tb-btn small" title="Move this bar to the other edge of the screen">Move bar</button>
+  </div>
+  <p class="tb-help" id="tbHelp">Drag on the screen to draw a box around text to read. Drag a box to move it, its corners to resize it.</p>
+  <div class="tb-row">
+    <label for="tbName">Name</label>
+    <input id="tbName" maxlength="40" spellcheck="false" autocomplete="off">
+    <span id="tbPos" class="tb-pos" aria-hidden="true"></span>
+  </div>
+  <div class="tb-row tb-actions">
+    <button type="button" id="tbNew" class="tb-btn">New box <kbd>N</kbd></button>
+    <button type="button" id="tbDelete" class="tb-btn">Delete <kbd>Del</kbd></button>
+    <span class="tb-spacer"></span>
+    <button type="button" id="tbCancel" class="tb-btn">Cancel <kbd>Esc</kbd></button>
+    <button type="button" id="tbSave" class="tb-btn primary">Save <kbd>Enter</kbd></button>
+  </div>
+  <details class="tb-keys">
+    <summary>Keys</summary>
+    <ul>
+      <li><kbd>Tab</kbd> next box, <kbd>1</kbd>–<kbd>9</kbd> box by number</li>
+      <li><kbd>Arrows</kbd> move, with <kbd>Shift</kbd> in bigger steps</li>
+      <li><kbd>Alt</kbd> + <kbd>Arrows</kbd> make wider, narrower, taller or shorter</li>
+      <li><kbd>W</kbd> where is it (said out loud)</li>
+    </ul>
+  </details>
+</div>
+
+<div id="live" class="sr-only" role="status" aria-live="polite"></div>
+<script src="overlay.js"></script>
+</body>
+</html>

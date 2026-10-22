@@ -311,6 +311,7 @@ const reader = {
   current: null,
   controller: null,
   paused: false,
+  held: false,      // held back by the desktop app's screen reader, apart from pausing
   lastSpoken: null,
   readCount: 0,     // numbers messages in the order they finished, for replay
 };
@@ -368,7 +369,7 @@ function filterReason(entry) {
 }
 
 function pump() {
-  if (reader.paused || reader.current) return;
+  if (reader.paused || reader.held || reader.current) return;
   // A replay holds the live queue back until it's over.
   if (replay.active) {
     pumpReplay();
@@ -486,7 +487,8 @@ function setPaused(paused) {
   // Pausing or resuming during a replay takes over from whatever the replay
   // would have done at the end.
   if (replay.active) replay.pauseAfter = false;
-  if (reader.controller) {
+  // While held, the message stays paused until the hold ends.
+  if (reader.controller && !reader.held) {
     if (paused) reader.controller.pause();
     else reader.controller.resume();
   }
@@ -494,6 +496,19 @@ function setPaused(paused) {
   renderNow();
   updateMediaSession();
   announce(paused ? 'Reading paused' : 'Reading resumed');
+}
+
+// The desktop app's screen reader holds chat back while it reads the screen,
+// without it showing as paused: the message being read stops where it is and
+// carries on from there once the hold ends.
+function setHeld(held) {
+  if (reader.held === held) return;
+  reader.held = held;
+  if (reader.controller && !reader.paused) {
+    if (held) reader.controller.pause();
+    else reader.controller.resume();
+  }
+  if (!held) pump();
 }
 
 function skipCurrent() {
@@ -3560,7 +3575,36 @@ const host = {
   // The chats in the top bar, for the bot's multistream relay to reuse.
   readerChats: () => chats.filter(isActive).map((c) => ({ id: c.id, platform: c.platform, target: c.client.channel, state: c.state, videoId: c.client.videoId || '' })),
 
-  state: () => ({ paused: reader.paused, waiting: reader.queue.length, speaking: !!reader.current, volume: settings.volume, rate: settings.rate }),
+  state: () => ({ paused: reader.paused, held: reader.held, waiting: reader.queue.length, speaking: !!reader.current, volume: settings.volume, rate: settings.rate }),
+
+  // The screen reader (desktop/bot/screen.js): chat waits while it speaks,
+  // and it speaks right away in a voice of its own, outside the chat queue.
+  hold: (on) => setHeld(!!on),
+  readerEngine: () => (activeEngine() === kokoroEngine ? 'kokoro' : 'system'),
+  // Every voice of both engines. Neural ones can only be used once loaded.
+  allVoices: () => ({
+    system: systemEngine.voices().filter((v) => !v.novelty).map((v) => ({ id: v.id, name: v.name, lang: v.lang })),
+    neural: KOKORO_VOICES.map((v) => ({ id: v.id, name: `${v.name} (${v.accent === 'UK' ? 'British' : 'American'})` })),
+    neuralState: kokoroEngine.state,
+    reader: { engine: activeEngine() === kokoroEngine ? 'kokoro' : 'system', voiceId: readerVoiceOptions(activeEngine()).voiceId },
+  }),
+  // `engine` is 'system', 'kokoro' or '' for the reader's own voice. Neural
+  // voices fall back to the reader's system voice until they're loaded.
+  // Returns a controller with `done` and `stop()`.
+  speakVoice(text, { engine = '', voiceId = '', rate = 1, pitch = 1, volume = 100 } = {}) {
+    const body = String(text || '').trim();
+    const getVol = () => Math.max(0, Math.min(1, Number(volume) / 100));
+    let eng = engine === 'kokoro' ? kokoroEngine : engine === 'system' ? systemEngine : activeEngine();
+    if (eng === kokoroEngine && kokoroEngine.state !== 'ready') eng = systemEngine;
+    const known = eng === kokoroEngine ? KOKORO_VOICES.some((v) => v.id === voiceId) : systemEngine.voices().some((v) => v.id === voiceId);
+    const id = engine && known && (eng === kokoroEngine) === (engine === 'kokoro') ? voiceId : readerVoiceOptions(eng).voiceId;
+    if (!body) return { done: Promise.resolve(), stop() {}, engine: eng.id };
+    const controller = eng === kokoroEngine
+      ? kokoroEngine.speakApart(body, { voiceId: id, speed: rate }, { getVolume: getVol })
+      : systemEngine.speak(body, { voiceId: id, rate, pitch }, { getVolume: getVol });
+    controller.engine = eng.id;
+    return controller;
+  },
   setPaused: (paused) => setPaused(!!paused),
   togglePause: () => togglePause(),
   skip: () => skipCurrent(),
@@ -3653,7 +3697,7 @@ function loadBot() {
   if (!base) return;
   document.head.append(el('link', { rel: 'stylesheet', href: `${base}bot.css` }));
   // In order, each after the one before, like the <script> tags above.
-  const files = ['core.js', 'twitch.js', 'eventsub.js', 'variables.js', 'effects.js', 'triggers.js', 'community.js', 'obs.js', 'spotify.js', 'relay.js', 'importers.js', 'ui.js', 'ui-tabs.js', 'ui-multistream.js', 'ui-spotify.js', 'dashboard.js', 'integrations.js', 'shell.js', 'setup.js', 'start.js'];
+  const files = ['core.js', 'twitch.js', 'eventsub.js', 'variables.js', 'effects.js', 'triggers.js', 'community.js', 'obs.js', 'spotify.js', 'relay.js', 'importers.js', 'screen.js', 'ui.js', 'ui-tabs.js', 'ui-multistream.js', 'ui-spotify.js', 'ui-screen.js', 'dashboard.js', 'integrations.js', 'shell.js', 'setup.js', 'start.js'];
   const next = (i) => {
     if (i >= files.length) return;
     const script = el('script', { src: `${base}${files[i]}` });

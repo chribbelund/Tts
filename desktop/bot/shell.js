@@ -34,6 +34,10 @@
         { id: 'viewer-controls', label: 'Viewer controls', parts: ['reader:viewers', 'tab:readerLinks'], lead: 'Bits, channel points and chat commands that change how chat is read.' },
       ],
     },
+    {
+      group: 'Accessibility',
+      pages: [{ id: 'screen', label: 'Screen reader', parts: ['tab:screen'], lead: 'Reads text from anywhere on the screen out loud, without following the mouse, so it works in games that lock the mouse in the middle.' }],
+    },
     { group: 'Bot', pages: ['commands', 'events', 'rewards', 'timers', 'lists', 'counters'] },
     { group: 'Community', pages: ['viewers', 'points', 'quotes', 'moderation'] },
     { group: 'Stream', pages: ['multistream', 'overlay', 'obs', 'spotify'] },
@@ -245,6 +249,9 @@
     const sp = Bot.spotify;
     if (sp.state === 'connected') out.spotify = sp.problem ? { state: 'error', text: sp.problem } : { state: 'on', text: `${Bot.data.spotify.queue.length} waiting` };
     else if (sp.state === 'error') out.spotify = { state: 'error', text: sp.text };
+    const sr = Bot.screen;
+    if (sr.status === 'watching') out.screen = sr.problem ? { state: 'error', text: sr.problem } : { state: 'on', text: `Watching ${sr.zones().filter((z) => z.enabled !== false && z.mode !== 'manual').length} zones` };
+    else if (sr.status === 'error' || (Bot.data.screen.enabled && sr.problem)) out.screen = { state: 'error', text: sr.problem || 'Not working' };
     const ms = Bot.data.multistream;
     if (ms.enabled) {
       const errors = Object.values(Bot.relay.stats).map((x) => x.error).filter(Boolean);

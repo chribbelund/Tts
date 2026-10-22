@@ -8,10 +8,14 @@ const { toAccelerator, isMediaKey } = require('./accelerator');
 const { YouTubeChat } = require('./sources/youtube');
 const { TikTokChat } = require('./sources/tiktok');
 const bot = require('./bot-main');
+const screenReader = require('./screen-main');
 
 // Chromium won't play audio until the page has been clicked. A reader that is
 // started or resumed by a hotkey has no click to wait for, so allow it up front.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+// Chromium's text detector, which the screen reader falls back on where the
+// system's own text recognition can't be started (desktop/bot/screen.js).
+app.commandLine.appendSwitch('enable-blink-features', 'TextDetector');
 
 const IS_MAC = process.platform === 'darwin';
 
@@ -323,6 +327,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     bot.setup({ getWindow: () => win });
+    screenReader.setup({ getWindow: () => win });
     buildMenu();
     buildTray();
     createWindow();

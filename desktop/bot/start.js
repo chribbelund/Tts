@@ -59,8 +59,13 @@ function hookIntoReader() {
     try { Bot.chat.fromRemote(entry); } catch (err) { Bot.log('error', err.message); }
   };
 
-  // The setup guide comes from the macOS Settings menu; the rest are hotkeys.
-  host.onAction = (action) => (action === 'bot:setup' ? Bot.setup.open() : Bot.hotkeys.run(action));
+  // The setup guide comes from the macOS Settings menu; the rest are hotkeys:
+  // the screen reader's ("bot:sr:…") and the bot's own.
+  host.onAction = (action) => {
+    if (action === 'bot:setup') return Bot.setup.open();
+    if (action.startsWith('bot:sr:')) return Bot.screen.run(action.slice(7));
+    return Bot.hotkeys.run(action);
+  };
 
   // Backup & import saves the bot along with the reader, and loads it back.
   host.backupExtra = () => ({ setup: Bot.data, ...(Bot.data.ui.backupViewers !== false ? { viewers: Bot.viewers } : {}) });
@@ -74,7 +79,7 @@ function hookIntoReader() {
       return false;
     }
   };
-  host.hotkeys = () => (Bot.data ? Bot.hotkeys.bindings() : []);
+  host.hotkeys = () => (Bot.data ? [...Bot.hotkeys.bindings(), ...Bot.screen.bindings()] : []);
 }
 
 function startTwitch() {
@@ -125,6 +130,7 @@ function startTwitch() {
   if (Bot.data.obs.enabled && Bot.data.obs.autoConnect) Bot.obs.connect();
   Bot.spotify.connect().catch((err) => Bot.log('error', `Spotify: ${err.message}`));
   Bot.relay.start();
+  await Bot.screen.start().catch((err) => Bot.log('error', `Screen reader: ${err.message}`));
   Bot.host.syncHotkeys();
 
   Bot.ready = true;

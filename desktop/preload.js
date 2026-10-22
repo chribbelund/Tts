@@ -82,6 +82,30 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
     },
   },
 
+  // The screen reader (desktop/bot/screen.js, screen-main.js): which screens
+  // there are, capturing one, reading the text on a picture of it, and the
+  // windows that sit on top of a game.
+  screen: {
+    displays: () => ipcRenderer.invoke('screen:displays'),
+    access: () => ipcRenderer.invoke('screen:access'),
+    askAccess: () => ipcRenderer.invoke('screen:ask-access'),
+    // Called before getDisplayMedia(), which then gets this screen without a picker.
+    want: (displayId) => ipcRenderer.invoke('screen:want', displayId),
+    sourceId: (displayId) => ipcRenderer.invoke('screen:source', displayId),
+    // `image` is a PNG as a Uint8Array. Resolves with { lines: [{ text, conf, box: [x, y, w, h] }] } or { error }.
+    ocr: (image, options = {}) => ipcRenderer.invoke('screen:ocr', { image, ...options }),
+    ocrStatus: (options) => ipcRenderer.invoke('screen:ocr-status', options || {}),
+    // Opens the zone editor over a screen; resolves with { zones } or { canceled }.
+    editZones: (payload) => ipcRenderer.invoke('screen:edit', payload),
+    setMarkers: (state) => ipcRenderer.send('screen:markers', state),
+    setLens: (state) => ipcRenderer.send('screen:lens', state),
+    onEvent: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on('screen:event', listener);
+      return () => ipcRenderer.off('screen:event', listener);
+    },
+  },
+
   toggleWindow: () => ipcRenderer.send('window:toggle'),
   hideWindow: () => ipcRenderer.send('window:hide'),
   openExternal: (url) => ipcRenderer.send('shell:open-external', url),

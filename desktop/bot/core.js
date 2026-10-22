@@ -107,6 +107,39 @@ const BOT_DEFAULTS = {
     overlayLink: { next: 0, art: true, requester: true, progress: true, hideIdle: true, size: '' },
   },
   sound: { device: '', volume: 100 },
+  // The screen reader (screen.js): zones on screen read out loud as their
+  // text changes, a reading cursor moved by hotkeys, and the lens.
+  screen: {
+    enabled: false,          // watch the zones of the profile in use
+    profile: '',             // id of the profile in use
+    profiles: [],            // [{ id, name, display, zones: [zone] }], see screen.js for a zone
+    pauseChat: true,         // chat waits while screen text is read
+    showZones: false,        // outlines of the zones on screen
+    highlight: true,         // a box around what's being read
+    sensitivity: 'normal',   // low | normal | high: how small a change is looked at
+    interval: 250,           // ms between looks at the zones
+    fastOcr: false,          // quicker, less accurate text recognition
+    numberKeys: true,        // Ctrl+Alt+1…9 read zone 1…9
+    nav: { voice: { engine: '', voiceId: '', rate: 1.1, pitch: 1, volume: 100 }, wrap: false },
+    lens: { enabled: false, follow: 'focus', zone: '', zoom: 3, width: 760, height: 280, position: 'top-right', display: '', filter: 'none', caption: true, captionSize: 30 },
+    // A cleared key is { code: '' }, so it isn't put back by the defaults.
+    keys: {
+      toggle: { code: 'KeyA', ctrl: true, alt: true, shift: false, meta: false },
+      readAll: { code: 'KeyS', ctrl: true, alt: true, shift: false, meta: false },
+      next: { code: 'ArrowDown', ctrl: true, alt: true, shift: false, meta: false },
+      prev: { code: 'ArrowUp', ctrl: true, alt: true, shift: false, meta: false },
+      left: { code: 'ArrowLeft', ctrl: true, alt: true, shift: false, meta: false },
+      right: { code: 'ArrowRight', ctrl: true, alt: true, shift: false, meta: false },
+      centre: { code: 'KeyC', ctrl: true, alt: true, shift: false, meta: false },
+      repeat: { code: 'KeyR', ctrl: true, alt: true, shift: false, meta: false },
+      stop: { code: 'KeyX', ctrl: true, alt: true, shift: false, meta: false },
+      lens: { code: 'KeyL', ctrl: true, alt: true, shift: false, meta: false },
+      zoomIn: { code: 'Equal', ctrl: true, alt: true, shift: false, meta: false },
+      zoomOut: { code: 'Minus', ctrl: true, alt: true, shift: false, meta: false },
+      profile: { code: 'KeyP', ctrl: true, alt: true, shift: false, meta: false },
+      edit: { code: 'KeyE', ctrl: true, alt: true, shift: false, meta: false },
+    },
+  },
   // Multistream: the three chats joined up (relay.js).
   multistream: {
     enabled: false,

@@ -562,7 +562,7 @@ UI.mount = (tab, panel) => {
 
 UI.init = () => {
   Bot.shell.init();
-  for (const type of ['eventsub', 'accounts', 'live', 'obs', 'overlay', 'relay', 'spotify', 'spotify-queue']) Bot.on(type, () => Bot.shell.renderStatus());
+  for (const type of ['eventsub', 'accounts', 'live', 'obs', 'overlay', 'relay', 'spotify', 'spotify-queue', 'screen']) Bot.on(type, () => Bot.shell.renderStatus());
   Bot.shell.renderStatus();
 };
 

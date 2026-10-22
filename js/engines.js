@@ -570,6 +570,52 @@ class KokoroEngine {
     };
   }
 
+  // Plays on an audio context of its own, apart from the reader's, so the
+  // desktop app's screen reader can speak while chat is held (which suspends
+  // the reader's context) and with its own volume.
+  speakApart(text, { voiceId, speed = 1 }, { getVolume }) {
+    if (!this.apartCtx) {
+      this.apartCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const ctx = this.apartCtx;
+    if (ctx.state === 'suspended') ctx.resume();
+    const gain = ctx.createGain();
+    gain.gain.value = getVolume();
+    gain.connect(ctx.destination);
+    let state = 'playing';
+    let source = null;
+    let resolveDone;
+    const done = new Promise((r) => { resolveDone = r; });
+    const finish = () => {
+      if (state === 'done') return;
+      state = 'done';
+      try { gain.disconnect(); } catch {}
+      resolveDone();
+    };
+    this.generate(text, voiceId, Math.min(2, Math.max(0.5, speed))).then(({ samples, sampleRate }) => {
+      if (state === 'done') return;
+      const buffer = ctx.createBuffer(1, samples.length, sampleRate);
+      buffer.copyToChannel(samples, 0);
+      source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(gain);
+      source.onended = finish;
+      source.start();
+    }, (err) => {
+      console.warn('Kokoro generation failed:', err);
+      finish();
+    });
+    return {
+      done,
+      stop() {
+        if (state === 'done') return;
+        if (source) { source.onended = null; try { source.stop(); } catch {} }
+        finish();
+      },
+      volumeChanged() { gain.gain.setTargetAtTime(getVolume(), ctx.currentTime, 0.03); },
+    };
+  }
+
   async preview(text, voiceId, volume) {
     const { samples, sampleRate } = await this.generate(text, voiceId, 1);
     const audio = new Audio(URL.createObjectURL(floatToWav(samples, sampleRate)));

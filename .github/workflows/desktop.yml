@@ -46,7 +46,7 @@ jobs:
         working-directory: desktop
         shell: bash
         run: |
-          for f in *.js sources/*.js bot/*.js overlay/*.js ../js/*.js; do
+          for f in *.js sources/*.js bot/*.js overlay/*.js screen/*.js ../js/*.js; do
             node --check "$f" || exit 1
           done
 

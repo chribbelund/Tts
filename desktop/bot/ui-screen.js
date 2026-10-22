@@ -1,0 +1,397 @@
+'use strict';
+
+// The Screen reader page: turning it on, the zones of each profile (drawn on
+// screen, from a template, or typed in), each zone's voice, the reading
+// cursor, the lens and the hotkeys. The logic is screen.js.
+
+(() => {
+  const h = UI.h;
+  const S = Bot.screen;
+  const c = () => Bot.data.screen;
+  const save = () => Bot.save();
+  const IS_MAC = window.chatReaderDesktop.platform === 'darwin';
+
+  const MODE_SHORT = { changes: 'When it changes', 'new-lines': 'New lines', menu: 'Highlighted line', manual: 'When I ask' };
+  const pct = (v) => Math.round(v * 1000) / 10;
+
+  // -------------------------------------------------------------------------
+  // Voices
+  // -------------------------------------------------------------------------
+
+  function voiceLabel(voice) {
+    const all = Bot.host.allVoices();
+    if (!voice.engine) return 'The reader’s voice';
+    const list = voice.engine === 'kokoro' ? all.neural : all.system;
+    const v = list.find((x) => x.id === voice.voiceId);
+    const name = v ? v.name : 'Default';
+    return voice.engine === 'kokoro' && all.neuralState !== 'ready' ? `${name} (neural, not loaded)` : name;
+  }
+
+  // Engine, voice, speed, pitch, volume and a button to hear it.
+  function voicePicker(voice, { sample = 'This is how I sound.', onChange = () => {} } = {}) {
+    const box = h('div', { class: 'sr-voice' });
+    const draw = () => {
+      const all = Bot.host.allVoices();
+      const engine = UI.select(voice, 'engine', [
+        ['', 'The reader’s own voice'],
+        ['system', 'A system voice'],
+        ['kokoro', `A neural voice${all.neuralState === 'ready' ? '' : ' (load them under Voices)'}`],
+      ], { label: 'Kind of voice', onChange: () => { voice.voiceId = ''; onChange(); draw(); } });
+      let pick = null;
+      if (voice.engine === 'system') {
+        const lang = (navigator.language || 'en').slice(0, 2);
+        const mine = all.system.filter((v) => v.lang.slice(0, 2) === lang);
+        const other = all.system.filter((v) => v.lang.slice(0, 2) !== lang);
+        pick = UI.select(voice, 'voiceId', [
+          ['', 'Pick a voice…'],
+          ...(mine.length ? [{ group: 'Your language', options: mine.map((v) => [v.id, `${v.name} (${v.lang})`]) }] : []),
+          ...(other.length ? [{ group: 'Other languages', options: other.map((v) => [v.id, `${v.name} (${v.lang})`]) }] : []),
+        ], { label: 'Voice', onChange });
+      } else if (voice.engine === 'kokoro') {
+        pick = UI.select(voice, 'voiceId', [['', 'Pick a voice…'], ...all.neural.map((v) => [v.id, v.name])], { label: 'Voice', onChange });
+      }
+      box.replaceChildren(
+        UI.row(UI.field('Voice', engine), pick ? UI.field('Which one', pick) : null,
+          UI.button('Hear it', () => S.preview(voice, sample))),
+        UI.row(
+          UI.field('Speed', UI.range(voice, 'rate', { min: 0.5, max: 2.5, step: 0.05, suffix: '×', onChange })),
+          voice.engine === 'kokoro' ? null : UI.field('Pitch', UI.range(voice, 'pitch', { min: 0.5, max: 1.5, step: 0.05, suffix: '', onChange })),
+          UI.field('Volume', UI.range(voice, 'volume', { min: 0, max: 100, step: 5, onChange }))),
+      );
+    };
+    draw();
+    return box;
+  }
+
+  // -------------------------------------------------------------------------
+  // Keys
+  // -------------------------------------------------------------------------
+
+  function keyCapture(obj, key, name, onChange) {
+    let capturing = false;
+    const label = () => (obj[key] && obj[key].code ? Bot.host.keyLabel(obj[key]) : 'Not set');
+    const button = UI.button('', () => (capturing ? stop() : start()), { cls: 'btn small keycap' });
+    const onKey = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.code === 'Escape') { stop(); return; }
+      if (/^(Shift|Control|Alt|Meta|OS)(Left|Right)?$/.test(e.code)) return;
+      obj[key] = e.code === 'Backspace' || e.code === 'Delete' ? { code: '' } : { code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
+      stop();
+      onChange();
+    };
+    function start() {
+      capturing = true;
+      button.classList.add('capturing');
+      button.textContent = 'Press keys…';
+      window.addEventListener('keydown', onKey, true);
+    }
+    function stop() {
+      capturing = false;
+      button.classList.remove('capturing');
+      button.textContent = label();
+      window.removeEventListener('keydown', onKey, true);
+    }
+    button.textContent = label();
+    button.setAttribute('aria-label', `Keys for ${name}: ${label()}. Activate, then press the keys you want. Backspace clears them.`);
+    return button;
+  }
+
+  // -------------------------------------------------------------------------
+  // Editing one zone
+  // -------------------------------------------------------------------------
+
+  function editZone(zone, isNew) {
+    UI.edit({
+      title: isNew ? 'New zone' : `Zone: ${zone.name}`,
+      item: zone,
+      saveLabel: isNew ? 'Add zone' : 'Save',
+      build: (z, rebuild) => {
+        const r = z.rect;
+        const pos = (k, label) => {
+          const holder = { v: pct(r[k]) };
+          return UI.field(label, UI.number(holder, 'v', { min: 0, max: 100, step: 0.5, onChange: (n) => { r[k] = n / 100; z.rect = { ...r }; } }));
+        };
+        return [
+          UI.row(UI.field('Name', UI.text(z, 'name', { maxlength: 40 })), UI.check(z, 'enabled', 'On')),
+          UI.field('What it reads', UI.select(z, 'mode', S.MODES, { onChange: rebuild })),
+          z.mode === 'menu' ? h('p', { class: 'hint' }, 'Looks for the line that stands out from the others, by colour or brightness, and reads it each time it moves. Works best when the box holds only the menu.') : null,
+          z.mode === 'new-lines' ? h('p', { class: 'hint' }, 'What’s in the box when it starts is not read; after that, each line that wasn’t there before is.') : null,
+          h('div', { class: 'field nested' }, h('div', { class: 'row-label' }, 'Voice'), voicePicker(z.voice, { sample: `This is ${z.name || 'this zone'}.` })),
+          UI.row(
+            UI.field('When new text comes', UI.select(z, 'interrupt', S.INTERRUPTS)),
+            UI.field('Wait for it to settle (ms)', UI.number(z, 'settle', { min: 0, max: 5000, step: 50 }), 'Text being typed out or fading in is read once it stops changing.')),
+          UI.field('Say first', UI.text(z, 'prefix', { placeholder: 'e.g. Objective', maxlength: 40 }), 'Said before the text, to tell zones in the same voice apart. Leave empty to say only the text.'),
+          UI.field('Leave out', UI.text(z, 'ignore', { multiline: true, rows: 3, placeholder: 'One per line, e.g.\n[E]\n/\\d+ m$/' }), 'Words or phrases never read from this box, one per line. /…/ is a regular expression.'),
+          h('div', { class: 'field nested' },
+            h('div', { class: 'row-label' }, 'Where on the screen (% of its width and height)'),
+            UI.row(pos('x', 'From the left'), pos('y', 'From the top'), pos('w', 'Width'), pos('h', 'Height')),
+            UI.row(
+              UI.select({ t: '' }, 't', [['', 'Move it to a template’s spot…'], ...S.TEMPLATES.map((t, i) => [String(i), t.name])], {
+                label: 'Use the position of a template',
+                onChange: (v) => { if (v !== '') { z.rect = { ...S.TEMPLATES[Number(v)].rect }; rebuild(); } },
+              }))),
+        ];
+      },
+      onTest: (z) => S.preview(z.voice, `This is ${z.name}.`),
+      onSave: (z) => {
+        const zones = S.profile().zones;
+        const i = zones.findIndex((x) => x.id === z.id);
+        if (i === -1) zones.push(z); else zones[i] = z;
+        save();
+        S.apply({ keys: true });
+      },
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Sections
+  // -------------------------------------------------------------------------
+
+  const liveNodes = { now: null };
+
+  function statusSection() {
+    const status = UI.status();
+    const cfg = c();
+    const zones = S.zones();
+    const watching = zones.filter((z) => z.enabled !== false && z.mode !== 'manual').length;
+    let line;
+    if (!cfg.enabled) line = 'Off. The hotkeys still read the screen when you press them.';
+    else if (!watching) line = 'On, but no zone is set to read by itself. Add a zone below.';
+    else if (S.status === 'watching') line = `Watching ${watching} zone${watching === 1 ? '' : 's'} in “${S.profile().name}”.`;
+    else if (S.status === 'starting') line = 'Starting…';
+    else line = 'Not watching.';
+    const nowLine = h('p', { class: 'hint sr-now' });
+    liveNodes.now = nowLine;
+    drawLive();
+
+    const ocr = S.ocr;
+    const testOut = h('p', { class: 'hint', role: 'status' });
+    return UI.section('Status',
+      UI.check(cfg, 'enabled', 'Read the zones out loud when their text changes', { onChange: () => { save(); S.apply(); } }),
+      h('p', { class: S.problem ? 'warn' : 'hint' }, S.problem || line),
+      nowLine,
+      IS_MAC && S.access !== 'granted' ? h('div', { class: 'warn' },
+        h('p', {}, 'macOS has to allow Chat Reader to see the screen. Press the button, turn Chat Reader on under Screen Recording, then quit and open the app again.'),
+        UI.button('Allow screen recording…', async () => { await S.askAccess(); UI.rerender(); }, { cls: 'btn small primary' })) : null,
+      UI.row(
+        h('span', { class: 'hint' }, `Text recognition: ${ocr.engine || (IS_MAC ? 'Apple Vision' : 'Windows OCR')}${ocr.error ? ` — ${ocr.error}` : ''}`),
+        UI.button('Test it', (e) => UI.busy(e.currentTarget, async () => {
+          UI.say(testOut, 'Reading a test picture… The first time can take a few seconds.');
+          const r = await S.selfTest();
+          UI.say(testOut, r.text ? `Read “${r.text}” in ${r.ms} ms.` : 'It ran, but found no text.', !r.text);
+        }, testOut)),
+        UI.button('Read the whole screen', () => S.navigate('readAll')),
+        UI.button('Stop', () => S.stop())),
+      testOut,
+      status);
+  }
+
+  function drawLive() {
+    const node = liveNodes.now;
+    if (!node || !node.isConnected) return;
+    const s = S.speaking;
+    const zone = s && S.zones().find((z) => z.id === s.zone);
+    node.textContent = s ? `Reading${zone ? ` (${zone.name})` : ''}: ${UI.trim(s.text, 120)}` : '';
+    node.hidden = !s;
+    for (const cell of document.querySelectorAll('[data-sr-last]')) {
+      const last = S.last.get(cell.dataset.srLast);
+      cell.textContent = last ? UI.trim(last.text, 60) : '–';
+      cell.title = last ? last.text : '';
+    }
+  }
+  Bot.on('screen-live', drawLive);
+
+  function profileSection() {
+    const cfg = c();
+    const p = S.profile();
+    const displays = S.displays.length > 1
+      ? UI.field('Screen', UI.select(p, 'display', [['', 'The main screen'], ...S.displays.map((d) => [d.id, `${d.label}${d.primary ? ' (main)' : ''} · ${d.pixels.width}×${d.pixels.height}`])], { onChange: () => { save(); S.apply(); } }))
+      : null;
+    return UI.section('Profile',
+      UI.lead('A profile is a set of zones, usually one per game. Switch between them here or with the Next profile hotkey.'),
+      UI.row(
+        UI.field('Profile in use', UI.select(cfg, 'profile', cfg.profiles.map((x) => [x.id, `${x.name} (${x.zones.length})`]), { onChange: () => { save(); S.apply({ keys: true }); } })),
+        displays,
+        UI.button('New', () => {
+          const name = prompt('Name of the new profile, e.g. the game it’s for:', '');
+          if (!name) return;
+          const np = S.newProfile(name.trim().slice(0, 60));
+          cfg.profiles.push(np);
+          cfg.profile = np.id;
+          save();
+          S.apply({ keys: true });
+        }),
+        UI.button('Rename', () => {
+          const name = prompt('New name:', p.name);
+          if (!name) return;
+          p.name = name.trim().slice(0, 60);
+          save();
+          S.apply();
+        }),
+        UI.button('Duplicate', () => {
+          const copy = Bot.clone(p);
+          copy.id = Bot.uid('p');
+          copy.name = `${p.name} (copy)`.slice(0, 60);
+          for (const z of copy.zones) z.id = Bot.uid('z');
+          cfg.profiles.push(copy);
+          cfg.profile = copy.id;
+          save();
+          S.apply({ keys: true });
+        }),
+        cfg.profiles.length > 1 ? UI.button('Delete', () => {
+          if (!confirm(`Delete the profile “${p.name}” and its ${p.zones.length} zones?`)) return;
+          cfg.profiles = cfg.profiles.filter((x) => x !== p);
+          cfg.profile = cfg.profiles[0].id;
+          save();
+          S.apply({ keys: true });
+        }, { cls: 'btn small danger' }) : null));
+  }
+
+  function zonesSection() {
+    const cfg = c();
+    const zones = S.zones();
+    const move = (i, d) => {
+      const j = i + d;
+      if (j < 0 || j >= zones.length) return;
+      [zones[i], zones[j]] = [zones[j], zones[i]];
+      save();
+      S.apply({ keys: true });
+    };
+    const template = UI.select({ t: '' }, 't', [['', '+ Add from a template…'], ...S.TEMPLATES.map((t, i) => [String(i), t.name])], {
+      label: 'Add a zone from a template',
+      onChange: (v) => {
+        if (v === '') return;
+        const z = S.newZone(S.TEMPLATES[Number(v)]);
+        editZone(z, true);
+      },
+    });
+    return UI.section('Reading zones',
+      UI.lead('Boxes on the screen whose text is read out loud, each in its own voice. Draw them over the game, start from a template, or type in where they go.'),
+      UI.row(
+        UI.button(S.editing ? 'Drawing…' : 'Draw zones on screen', () => S.editOnScreen({ hideMain: true }), { cls: 'btn small primary', disabled: S.editing }),
+        template,
+        UI.button('+ Add a zone', () => editZone(S.newZone(), true))),
+      h('p', { class: 'hint' }, `Drawing hides this window and covers the screen until you press Enter to save or Escape to cancel. You can also open it from inside a game with ${Bot.host.keyLabel(cfg.keys.edit)}.`),
+      UI.table(
+        [{ label: '#', cls: 'num' }, { label: 'On', cls: 'c-on' }, { label: 'Name' }, { label: 'Reads' }, { label: 'Voice' }, { label: 'Last read' }, { label: '', cls: 'c-act' }],
+        zones.map((z, i) => ({
+          off: z.enabled === false,
+          cells: [
+            String(i + 1),
+            UI.toggle(z, 'enabled', `${z.name} is on`, () => S.apply()),
+            h('span', {}, z.color ? h('span', { class: 'sr-swatch', 'aria-hidden': 'true', style: `background:${z.color}` }) : null, z.name),
+            MODE_SHORT[z.mode] || z.mode,
+            voiceLabel(z.voice),
+            h('span', { class: 'hint', 'data-sr-last': z.id }, S.last.has(z.id) ? UI.trim(S.last.get(z.id).text, 60) : '–'),
+            h('span', { class: 'bot-row-actions' },
+              UI.button('Edit', () => editZone(Bot.clone(z), false)),
+              UI.button('▶', () => S.readZone(z), { cls: 'x', aria: `Read ${z.name} now`, title: 'Read now' }),
+              UI.button('↑', () => move(i, -1), { cls: 'x', aria: `Move ${z.name} up`, title: 'Move up', disabled: i === 0 }),
+              UI.button('↓', () => move(i, 1), { cls: 'x', aria: `Move ${z.name} down`, title: 'Move down', disabled: i === zones.length - 1 }),
+              UI.button('🗑', () => {
+                if (!confirm(`Delete the zone “${z.name}”?`)) return;
+                S.profile().zones = zones.filter((x) => x !== z);
+                save();
+                S.apply({ keys: true });
+              }, { cls: 'x', aria: `Delete ${z.name}`, title: 'Delete' })),
+          ],
+        })),
+        { empty: 'No zones yet. Draw one on screen, or start from a template such as Subtitles.' }),
+      UI.check(cfg, 'numberKeys', `${Bot.host.keyLabel({ code: 'Digit1', ctrl: true, alt: true })} to ${Bot.host.keyLabel({ code: 'Digit9', ctrl: true, alt: true })} read zone 1 to 9, whatever it’s set to read`, { onChange: () => { save(); Bot.host.syncHotkeys(); } }),
+      UI.check(cfg, 'showZones', 'Show the zones on screen while playing', { onChange: () => { save(); S.apply(); } }));
+  }
+
+  function cursorSection() {
+    const cfg = c();
+    const k = (name) => Bot.host.keyLabel(cfg.keys[name]);
+    return UI.section('Reading cursor',
+      UI.lead('A cursor for the text on screen, moved by hotkeys instead of the mouse. The screen is looked at again each time you press one, so it keeps up with the game.'),
+      h('ul', { class: 'sr-keys-list' },
+        h('li', {}, h('kbd', {}, k('centre')), ' reads the text nearest the middle of the screen: what the crosshair is on.'),
+        h('li', {}, h('kbd', {}, k('next')), ' and ', h('kbd', {}, k('prev')), ' read the next and previous line, top to bottom.'),
+        h('li', {}, h('kbd', {}, k('left')), ' and ', h('kbd', {}, k('right')), ' jump to the nearest text on the left or right, for menus laid out side by side.'),
+        h('li', {}, h('kbd', {}, k('readAll')), ' reads everything on the screen, ', h('kbd', {}, k('stop')), ' stops.')),
+      h('div', { class: 'field nested' }, h('div', { class: 'row-label' }, 'Cursor voice'), voicePicker(cfg.nav.voice, { sample: 'Next line.', onChange: save })),
+      UI.check(cfg.nav, 'wrap', 'Go round to the top after the last line', { onChange: save }),
+      UI.check(cfg, 'highlight', 'Draw a box around what’s being read', { onChange: () => { save(); S.apply(); } }));
+  }
+
+  function lensSection() {
+    const cfg = c();
+    const l = cfg.lens;
+    const apply = () => { save(); S.pushLens(); };
+    const displays = S.displays.length > 1
+      ? UI.field('On screen', UI.select(l, 'display', [['', 'The screen being read'], ...S.displays.map((d) => [d.id, `${d.label}${d.primary ? ' (main)' : ''}`])], { onChange: apply }))
+      : null;
+    return UI.section('Lens',
+      UI.lead('A magnifier that follows what’s being read, not the mouse. It stays on top of the game and never takes the mouse or the keyboard.'),
+      UI.check(l, 'enabled', 'Show the lens', { onChange: () => { apply(); UI.rerender(); } }),
+      UI.row(
+        UI.field('Shows', UI.select(l, 'follow', [['focus', 'What’s being read'], ['centre', 'The middle of the screen'], ['zone', 'One zone, always']], { onChange: () => { apply(); UI.rerender(); } })),
+        l.follow === 'zone' ? UI.field('Zone', UI.select(l, 'zone', S.zones().map((z) => [z.id, z.name]), { onChange: apply })) : null,
+        UI.field('Zoom', UI.range(l, 'zoom', { min: 1, max: 12, step: 0.5, suffix: '×', onChange: apply }))),
+      UI.row(
+        UI.field('Where', UI.select(l, 'position', [
+          ['top-right', 'Top right'], ['top-left', 'Top left'], ['bottom-right', 'Bottom right'], ['bottom-left', 'Bottom left'],
+          ['top', 'Top middle'], ['bottom', 'Bottom middle'], ['fill', 'The whole screen (for a second screen)'],
+        ], { onChange: apply })),
+        displays,
+        UI.field('Width', UI.number(l, 'width', { min: 200, max: 3000, step: 20, onChange: apply })),
+        UI.field('Height', UI.number(l, 'height', { min: 100, max: 2000, step: 20, onChange: apply }))),
+      UI.row(
+        UI.field('Colours', UI.select(l, 'filter', [
+          ['none', 'As they are'], ['contrast', 'Stronger contrast'], ['invert', 'Inverted'], ['gray', 'Grey, stronger contrast'],
+          ['gray-invert', 'Grey, inverted'], ['yellow', 'Yellow on black'],
+        ], { onChange: apply })),
+        UI.field('Caption size', UI.number(l, 'captionSize', { min: 14, max: 96, step: 2, onChange: apply }))),
+      UI.check(l, 'caption', 'Write the text being read under the picture, in large letters', { onChange: apply }),
+      l.position === 'fill' && !(l.display && l.display !== S.profile().display)
+        ? h('p', { class: 'warn' }, 'A lens filling the screen being read covers the game. Pick another screen for it, or a corner.') : null);
+  }
+
+  function keysSection() {
+    const cfg = c();
+    const problems = Bot.host.hotkeyProblems();
+    const changedKeys = () => { save(); Bot.host.syncHotkeys(); setTimeout(UI.rerender, 300); };
+    return UI.section('Hotkeys',
+      UI.lead('These work while a game is focused. Click one and press the keys you want; Backspace clears it.'),
+      UI.table(
+        [{ label: 'Action' }, { label: 'Keys' }],
+        S.KEY_ACTIONS.map(([name, label]) => ({
+          cells: [label, h('span', {}, keyCapture(cfg.keys, name, label, changedKeys), problems[`bot:sr:${name}`] ? h('span', { class: 'hint warn-text' }, ` ${problems[`bot:sr:${name}`]}`) : null)],
+        }))));
+  }
+
+  function tuningSection() {
+    const cfg = c();
+    return UI.section('Speech and timing',
+      UI.check(cfg, 'pauseChat', 'Pause chat while screen text is read', { onChange: save }),
+      h('p', { class: 'hint' }, 'Chat carries on from where it stopped. Two system voices can’t talk at once, so chat in a system voice always waits.'),
+      UI.row(
+        UI.field('Notice changes', UI.select(cfg, 'sensitivity', [['low', 'Only big changes'], ['normal', 'Normal'], ['high', 'Even small changes']], { onChange: save })),
+        UI.field('Look every (ms)', UI.number(cfg, 'interval', { min: 100, max: 2000, step: 50, onChange: () => { save(); S.apply(); } }))),
+      UI.check(cfg, 'fastOcr', 'Faster but rougher text recognition', { onChange: save }),
+      h('details', { class: 'fx-more' },
+        h('summary', {}, 'Tips for games'),
+        h('ul', { class: 'sr-keys-list' },
+          h('li', {}, 'Use borderless or windowed full screen. True (exclusive) full screen can hide the game from screen capture and puts it above the lens.'),
+          h('li', {}, 'Big, plain subtitles with a dark background behind them are read best. Many games have both settings.'),
+          h('li', {}, 'Keep a box tight around its text: less moving picture behind it means fewer misreads.'),
+          h('li', {}, 'The lens, the outlines and the zone editor are hidden from screen capture, so they’re never read or streamed.'))));
+  }
+
+  UI.addTab('screen', 'Screen reader', (panel) => {
+    panel.append(
+      statusSection(),
+      profileSection(),
+      zonesSection(),
+      cursorSection(),
+      lensSection(),
+      keysSection(),
+      tuningSection());
+  }, { listens: ['screen'] });
+
+  // The engine's status shows on the page; look it up when the page opens.
+  Bot.on('page', (id) => { if (id === 'screen') S.checkOcr(false).catch(() => {}); });
+})();

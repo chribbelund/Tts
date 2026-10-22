@@ -363,3 +363,10 @@ p.code-box { display: block; }
   .sp-item { flex-wrap: wrap; }
   .sp-item-actions { width: 100%; justify-content: flex-end; }
 }
+
+/* Screen reader (ui-screen.js) */
+.sr-now { font-weight: 600; color: var(--text, inherit); }
+.sr-swatch { display: inline-block; width: 0.8em; height: 0.8em; margin-right: 0.45em; border-radius: 3px; vertical-align: -0.05em; outline: 1px solid rgba(0, 0, 0, 0.4); }
+.sr-keys-list { margin: 0.4em 0 0.8em; padding-left: 1.3em; line-height: 1.6; }
+.sr-keys-list kbd { white-space: nowrap; }
+.sr-voice .bot-range { min-width: 9em; }

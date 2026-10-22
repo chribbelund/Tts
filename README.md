@@ -273,6 +273,52 @@ public, so its importer works from the shape of the data and is best effort.
 **Not included, on purpose:** Firebot's custom scripts (running code from files), whispers
 (Twitch restricts them heavily), and integrations with paid services.
 
+## Screen reader (desktop app)
+
+Ordinary screen readers and magnifiers follow the mouse. In a game like Cyberpunk 2077
+the mouse is locked in the middle of the screen, so they read and magnify the same
+spot forever. The desktop app's screen reader never looks at the mouse. It has three
+ways in, all under *Accessibility → Screen reader*:
+
+- **Reading zones.** Boxes on the screen, drawn once per game (a *profile*). Each
+  is watched, and its text is read out loud when it changes, in a voice of its
+  own: subtitles in one voice, the objective in another, the menu in a third.
+  What a zone reads:
+
+  | Mode | For | Reads |
+  |---|---|---|
+  | When it changes | Subtitles, dialogue, objectives | The whole text, once, when it's new. Text typed out a letter at a time is read once it settles, and only the new part |
+  | New lines | Logs, notifications, game chat | Only lines that weren't there before |
+  | Highlighted line | Menus, dialogue choices | The line that stands out by colour or brightness, each time it moves |
+  | When I ask | Anything | Only with its number key or *Read now* |
+
+- **Reading cursor.** Hotkeys that work inside the game. `Ctrl+Alt+C` (`⌃⌥C`)
+  reads the text nearest the middle of the screen, where the crosshair is: the
+  game's equivalent of hovering. `Ctrl+Alt+↓`/`↑` step through the lines on
+  screen, `Ctrl+Alt+←`/`→` jump to the nearest text to the side (for menus laid
+  out in columns), `Ctrl+Alt+S` reads the whole screen and `Ctrl+Alt+X` stops.
+  While the cursor is in use the screen is read again in the background, so each
+  step answers straight away.
+- **Lens.** A magnifier window in a corner of any screen, or filling a second
+  screen. It follows what's being read, the middle of the screen or one zone,
+  zooms out just enough to fit a whole line, can recolour (inverted, grey,
+  yellow on black) and writes the text under the picture in large letters.
+
+Zones are drawn on top of the game (`Ctrl+Alt+E`, or *Draw zones on screen*) with
+the mouse or entirely by keyboard: `N` for a new box, arrows to move it, `Alt` +
+arrows to resize, `Tab` to the next one, `W` says where it is, `Enter` saves. Or
+start from a template (subtitles, dialogue choices, objective…), or type in where a
+zone goes. `Ctrl+Alt+1`…`9` read zone 1…9 on request. Every key can be changed.
+
+- Text is recognised by the system itself: Apple Vision on macOS, Windows OCR on
+  Windows 10 and 11. Nothing is sent anywhere.
+- Chat pauses while screen text is read and carries on where it stopped.
+- The lens, the outlines and the editor are hidden from screen capture, so they're
+  never read, magnified or streamed.
+- macOS has to allow Chat Reader under *Privacy & Security → Screen Recording*.
+  Games need borderless or windowed full screen: exclusive full screen hides the
+  game from capture and covers the lens.
+
 ## Deploying (Coolify, Railway, any static host)
 
 The server's Content-Security-Policy must allow three things:
@@ -528,5 +574,6 @@ For system voices, Microsoft Edge offers the most natural free options, the "…
 - `desktop/import-main.js`: reading Firebot and Mix It Up data (JSON, NeDB, SQLite, zip backups) for the importer
 - `desktop/bot/`: the bot itself, loaded into the page by the desktop app only — Twitch login and API (`twitch.js`), EventSub (`eventsub.js`), `$variables` (`variables.js`), effects (`effects.js`), commands, events and timers (`triggers.js`), viewers, points, games and moderation (`community.js`), OBS (`obs.js`), the multistream relay (`relay.js`), importing from other bots (`importers.js`), the controls and tabs (`ui.js`, `ui-tabs.js`, `ui-multistream.js`), the Dashboard's side column (`dashboard.js`), where the reader and the bot meet (`integrations.js`) and the window's sections (`shell.js`)
 - `desktop/overlay/`: the OBS overlay page
+- `desktop/screen-main.js`, `desktop/screen/`: the screen reader's main-process side — screen capture without a picker, the text recognition helpers (`ocr-mac.js` for Apple Vision, `ocr-win.ps1` for Windows OCR), and the windows over the game: the zone editor and outlines (`overlay.*`) and the lens (`lens.*`); `desktop/bot/screen.js` and `ui-screen.js` are its page side
 - `docs/bot-plan.md`: how the bot is put together, and why
 - `.github/workflows/desktop.yml`: builds the desktop binaries and publishes them on a `v*` tag
