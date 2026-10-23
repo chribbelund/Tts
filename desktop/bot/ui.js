@@ -575,8 +575,11 @@ UI.renderTab = (tab) => {
   const focused = tab.panel.contains(document.activeElement) ? document.activeElement : null;
   const focusLabel = focused && (focused.getAttribute('aria-label') || focused.textContent);
   tab.panel.replaceChildren();
+  // On a page split into sub-pages, a tab draws only the sections of it the
+  // sub-page showing has (shell.js sets tab.only); show(id) says which.
+  const show = (id) => !tab.only || tab.only.has(id);
   try {
-    tab.render(tab.panel);
+    tab.render(tab.panel, show);
   } catch (err) {
     console.error(err);
     tab.panel.append(h('p', { class: 'warn' }, `Something went wrong drawing this part: ${err.message}`));

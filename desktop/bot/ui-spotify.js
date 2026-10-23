@@ -28,7 +28,8 @@
   // Connecting
   // -------------------------------------------------------------------------
 
-  function connectSection(status) {
+  // `open`: on a sub-page of its own, so it isn't folded away once connected.
+  function connectSection(status, { open = false } = {}) {
     const c = sp();
     const connected = Sp.connected();
     const overlayOn = !!(Bot.overlayStatus && Bot.overlayStatus.running);
@@ -54,7 +55,7 @@
       h('p', { class: 'hint' }, 'Adding songs to Spotify’s queue and skipping need Spotify Premium. While your Spotify app is in development mode, only accounts you add under its User Management can log in, which is fine: only yours needs to.'),
       status,
     ];
-    if (connected) return h('details', { class: 'fx-more' }, h('summary', {}, 'Spotify app and login'), ...body);
+    if (connected && !open) return h('details', { class: 'fx-more' }, h('summary', {}, 'Spotify app and login'), ...body);
     return UI.section('Connect Spotify', ...body);
   }
 
@@ -261,7 +262,7 @@
   // The page
   // -------------------------------------------------------------------------
 
-  UI.addTab('spotify', 'Song requests', (panel) => {
+  UI.addTab('spotify', 'Song requests', (panel, show) => {
     const c = sp();
     const status = UI.status();
     nowNodes.status = status;
@@ -269,15 +270,16 @@
     const commands = Bot.commands.activeSystem().filter((x) => ['songrequest', 'song', 'songqueue', 'wrongsong', 'skipsong'].includes(x.key));
 
     panel.append(
-      UI.lead('Viewers request songs in chat; they wait in the queue below, where you can reorder and remove them, and each goes to Spotify shortly before the song playing ends. Your own playlist plays in between.'),
-      h('div', { class: 'bot-card', 'data-state': connected ? (Sp.problem ? 'error' : 'on') : Sp.state === 'error' ? 'error' : '' },
+      show('status') && UI.lead('Viewers request songs in chat; they wait in the queue below, where you can reorder and remove them, and each goes to Spotify shortly before the song playing ends. Your own playlist plays in between.'),
+      show('status') && h('div', { class: 'bot-card', 'data-state': connected ? (Sp.problem ? 'error' : 'on') : Sp.state === 'error' ? 'error' : '' },
         h('div', { class: 'bot-card-title' }, 'Spotify'),
         h('div', { class: 'bot-card-value' }, connected ? Sp.text : Sp.state === 'connecting' ? 'Connecting…' : Sp.loggingIn ? 'Waiting for the browser…' : 'Not connected'),
         !connected && Sp.text ? h('div', { class: `hint${Sp.state === 'error' ? ' bad' : ''}` }, Sp.text) : null,
         connected && Sp.account && Sp.account.product && Sp.account.product !== 'premium' ? h('div', { class: 'hint bad' }, 'This Spotify account isn’t Premium, so songs can’t be added to its queue.') : null),
-      connectSection(status),
-      connected ? nowCard(status) : null,
-      UI.section(`Request queue (${c.queue.length})`,
+      show('connect') && connectSection(status, { open: true }),
+      show('status') && !connected ? h('p', { class: 'hint' }, 'Connect Spotify under ', UI.button('Connection', () => Bot.shell.show('spotify/connect'), { cls: 'link' }), ' to play requests.') : null,
+      show('status') && connected ? nowCard(status) : null,
+      show('queue') && UI.section(`Request queue (${c.queue.length})`,
         UI.row(
           UI.check(c, 'requests', 'Take requests from chat', { onChange: () => { save(); Bot.emit('spotify', {}); } }),
           UI.check(c, 'autoplay', 'Hand them to Spotify as songs end', { onChange: () => { save(); Sp.poll(); } })),
@@ -288,7 +290,7 @@
         status,
         connected ? spotifyQueue(status) : null,
         historyList()),
-      UI.section('Rules for requests',
+      show('rules') && UI.section('Rules for requests',
         UI.lead('Mods and you skip the limits on length, songs per viewer and queue size. Blocked songs are blocked for everyone but you.'),
         UI.row(
           UI.field('Songs per viewer waiting (0 = any)', UI.number(c, 'maxPerUser', { min: 0, max: 100, onChange: save })),
@@ -300,14 +302,14 @@
         UI.field('Blocked words, artists or song links', UI.text(c, 'blocked', { multiline: true, rows: 3, placeholder: 'Separated by commas or new lines', onChange: save }), 'A song whose title or artist contains one of these can’t be requested.'),
         h('details', { class: 'fx-more' }, h('summary', {}, 'Advanced'),
           UI.field('Hand the next request to Spotify this many seconds before a song ends', UI.number(c, 'sendAhead', { min: 5, max: 120, onChange: save }), 'Until then a request can still be moved or removed. Too short, and Spotify may start the next playlist song first.'))),
-      UI.section('Chat commands',
+      show('commands') && UI.section('Chat commands',
         UI.lead('Built-in commands: change their names, who can use them, cooldowns, a points cost and their replies under Commands → Built in.'),
         UI.table([{ label: 'Command' }, { label: 'What it does' }, { label: 'Who' }],
           commands.map((x) => ({ cells: [h('code', {}, x.trigger), x.name.replace(/ \(Spotify\)$/, ''), Bot.roleName(x.permission)] })),
-          { empty: 'Enter a Client ID above to turn them on.' }),
+          { empty: 'Enter a Client ID under Connection to turn them on.' }),
         UI.row(UI.button('Open Commands', () => UI.select_('commands'))),
         h('p', { class: 'hint' }, 'To take requests through channel points instead, give a reward (with “The viewer types a message”) the Spotify effect, Request a song, under Rewards.')),
-      overlaySection(),
+      show('overlay') && overlaySection(),
     );
   }, { listens: ['spotify', 'spotify-queue', 'overlay'] });
 })();

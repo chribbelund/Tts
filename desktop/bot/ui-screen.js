@@ -218,7 +218,7 @@
     const watching = zones.filter((z) => z.enabled !== false && z.mode !== 'manual').length;
     let line;
     if (!cfg.enabled) line = 'Off. The hotkeys still read the screen when you press them.';
-    else if (!watching) line = 'On, but no zone is set to read by itself. Add a zone below.';
+    else if (!watching) line = 'On, but no zone is set to read by itself. Add one under Zones.';
     else if (S.status === 'watching') line = `Watching ${watching} zone${watching === 1 ? '' : 's'} in “${S.profile().name}”.`;
     else if (S.status === 'starting') line = 'Starting…';
     else line = 'Not watching.';
@@ -246,6 +246,27 @@
         UI.button('Stop', () => S.stop())),
       testOut,
       status);
+  }
+
+  // The first sub-page: the status, the profile in use, and what the other
+  // sub-pages are for.
+  function overviewSections() {
+    const zones = S.zones();
+    const watching = zones.filter((z) => z.enabled !== false && z.mode !== 'manual').length;
+    const go = (sub, label) => UI.button(label, () => Bot.shell.show(`screen/${sub}`), { cls: 'link' });
+    return [
+      statusSection(),
+      UI.section('Profile',
+        profilePicker(),
+        h('p', { class: 'hint' }, `${zones.length ? `${zones.length} zone${zones.length === 1 ? '' : 's'}, ${watching} reading by themselves. ` : 'No zones yet. '}`,
+          go('zones', zones.length ? 'Change the zones' : 'Add a zone'))),
+      UI.section('Also here',
+        h('ul', { class: 'sr-overview' },
+          h('li', {}, go('cursor', 'Reading cursor'), ': read the screen line by line with hotkeys.'),
+          h('li', {}, go('lens', 'Lens'), `: a magnifier that follows what’s read. ${c().lens.enabled ? 'On.' : 'Off.'}`),
+          h('li', {}, go('keys', 'Hotkeys'), ': the keys for all of it, working while a game is focused.'),
+          h('li', {}, go('tuning', 'Speech & timing'), ': pausing chat, how often the screen is looked at, and tips for games.'))),
+    ];
   }
 
   function drawLive() {
@@ -334,13 +355,23 @@
       UI.check(cfg, 'autoProfile', 'Switch profile by itself when one of its programs comes to the front', { onChange: () => { save(); S.apply(); } }));
   }
 
+  // The profile in use, to switch it from the pages that depend on it.
+  function profilePicker() {
+    const cfg = c();
+    const row = UI.row(
+      UI.field('Profile in use', UI.select(cfg, 'profile', cfg.profiles.map((x) => [x.id, `${x.name} (${x.zones.length})`]), { onChange: () => { save(); S.apply({ keys: true }); } })),
+      UI.button('Manage profiles', () => Bot.shell.show('screen/profiles')));
+    row.classList.add('sr-profile-row');
+    return row;
+  }
+
   function profileSection() {
     const cfg = c();
     const p = S.profile();
     const displays = S.displays.length > 1
       ? UI.field('Screen', UI.select(p, 'display', [['', 'The main screen'], ...S.displays.map((d) => [d.id, `${d.label}${d.primary ? ' (main)' : ''} · ${d.pixels.width}×${d.pixels.height}`])], { onChange: () => { save(); S.apply(); } }))
       : null;
-    return UI.section('Profile',
+    return UI.section('Profiles',
       UI.lead('A profile is a set of zones, usually one per game. Give it the game’s program and it’s used by itself when the game comes up, or switch here or with the Next profile hotkey.'),
       UI.row(
         UI.field('Profile in use', UI.select(cfg, 'profile', cfg.profiles.map((x) => [x.id, `${x.name} (${x.zones.length})`]), { onChange: () => { save(); S.apply({ keys: true }); } })),
@@ -401,7 +432,8 @@
       },
     });
     return UI.section('Reading zones',
-      UI.lead('Boxes on the screen whose text is read out loud, each in its own voice. Draw them over the game, start from a template, or type in where they go.'),
+      UI.lead('Boxes on the screen whose text is read out loud, each in its own voice. Draw them over the game, start from a template, or type in where they go. Each profile has its own zones.'),
+      profilePicker(),
       UI.row(
         UI.button(S.editing ? 'Drawing…' : 'Draw zones on screen', () => S.editOnScreen({ hideMain: true }), { cls: 'btn small primary', disabled: S.editing }),
         template,
@@ -515,15 +547,17 @@
           h('li', {}, 'The lens, the outlines and the zone editor are hidden from screen capture, so they’re never read or streamed.'))));
   }
 
-  UI.addTab('screen', 'Screen reader', (panel) => {
+  // The page is split into sub-pages (shell.js); show(id) says which
+  // sections the one showing has.
+  UI.addTab('screen', 'Screen reader', (panel, show) => {
     panel.append(
-      statusSection(),
-      profileSection(),
-      zonesSection(),
-      cursorSection(),
-      lensSection(),
-      keysSection(),
-      tuningSection());
+      ...(show('status') ? overviewSections() : []),
+      show('profile') && profileSection(),
+      show('zones') && zonesSection(),
+      show('cursor') && cursorSection(),
+      show('lens') && lensSection(),
+      show('keys') && keysSection(),
+      show('tuning') && tuningSection());
   }, { listens: ['screen'] });
 
   // The engine's status shows on the page; look it up when the page opens.

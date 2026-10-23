@@ -480,7 +480,7 @@
         S.starterNote ? h('p', { class: 'hint', role: 'status' }, S.starterNote) : null,
         UI.section('Coming from another bot?',
           UI.lead('Commands, events, timers, quotes and viewers with their points can be brought over from Firebot or Mix It Up.'),
-          UI.row(UI.button('Import from Firebot or Mix It Up…', () => goTo('backup')))),
+          UI.row(UI.button('Import from Firebot or Mix It Up…', () => goTo('backup/import')))),
       ],
     },
 
