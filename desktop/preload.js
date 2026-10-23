@@ -95,6 +95,8 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
     // `image` is a PNG as a Uint8Array. Resolves with { lines: [{ text, conf, box: [x, y, w, h] }] } or { error }.
     ocr: (image, options = {}) => ipcRenderer.invoke('screen:ocr', { image, ...options }),
     ocrStatus: (options) => ipcRenderer.invoke('screen:ocr-status', options || {}),
+    // PaddleOCR's worker and files: { workerUrl, ortUrl, wasm, det, rec, dict } or { error }.
+    paddleFiles: () => ipcRenderer.invoke('screen:paddle-files'),
     // Opens the zone editor over a screen; resolves with { zones } or { canceled }.
     editZones: (payload) => ipcRenderer.invoke('screen:edit', payload),
     setMarkers: (state) => ipcRenderer.send('screen:markers', state),

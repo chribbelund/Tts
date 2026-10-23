@@ -65,6 +65,10 @@ jobs:
         working-directory: desktop
         run: npm run sync-web
 
+      - name: Fetch the text recognition models
+        working-directory: desktop
+        run: npm run fetch-ocr
+
       - name: Build
         working-directory: desktop
         run: npx electron-builder ${{ matrix.args }} --publish never

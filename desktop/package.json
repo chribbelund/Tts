@@ -11,16 +11,18 @@
   "private": true,
   "scripts": {
     "sync-web": "node scripts/sync-web.js",
-    "start": "npm run sync-web && electron .",
+    "start": "npm run sync-web && npm run fetch-ocr && electron .",
     "icons": "electron scripts/make-icons.js",
-    "pack": "npm run sync-web && electron-builder --dir",
-    "dist": "npm run sync-web && electron-builder",
-    "dist:mac": "npm run sync-web && electron-builder --mac",
-    "dist:win": "npm run sync-web && electron-builder --win"
+    "pack": "npm run sync-web && npm run fetch-ocr && electron-builder --dir",
+    "dist": "npm run sync-web && npm run fetch-ocr && electron-builder",
+    "dist:mac": "npm run sync-web && npm run fetch-ocr && electron-builder --mac",
+    "dist:win": "npm run sync-web && npm run fetch-ocr && electron-builder --win",
+    "fetch-ocr": "node scripts/fetch-ocr.js"
   },
   "devDependencies": {
     "electron": "^44.7.2",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "onnxruntime-web": "1.22.0"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",

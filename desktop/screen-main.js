@@ -7,6 +7,8 @@
 //     for, without a picker
 //   - runs the operating system's own text recognition: Apple Vision on
 //     macOS, Windows OCR on Windows, each in a helper process that stays warm
+//   - hands the page the files for its own text recognition (PaddleOCR,
+//     run in a worker by the page: screen/ocr-worker.js)
 //   - shows the windows that sit on top of a game: the zone editor, the zone
 //     outlines and reading highlight, and the lens (a magnifier that follows
 //     what's being read instead of the mouse)
@@ -19,6 +21,7 @@ const { app, BrowserWindow, desktopCapturer, ipcMain, screen, session, shell, sy
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
@@ -224,6 +227,27 @@ async function recognize({ image, fast = false, digits = false, langs = [] } = {
     if (Array.isArray(langs) && langs.length) job.langs = langs.filter((l) => /^[\w-]{2,20}$/.test(l)).slice(0, 8);
     ocr.proc.stdin.write(`${JSON.stringify(job)}\n`);
   });
+}
+
+// The files PaddleOCR needs, read here because the page's fetch can't read
+// file:// URLs. scripts/fetch-ocr.js puts them in screen/models and screen/ort.
+async function paddleFiles() {
+  const file = (...p) => path.join(SCREEN_DIR, ...p);
+  try {
+    const [wasm, det, rec, dict] = await Promise.all([
+      fs.promises.readFile(file('ort', 'ort-wasm-simd-threaded.wasm')),
+      fs.promises.readFile(file('models', 'det.onnx')),
+      fs.promises.readFile(file('models', 'rec.onnx')),
+      fs.promises.readFile(file('models', 'dict.txt'), 'utf8'),
+    ]);
+    return {
+      workerUrl: pathToFileURL(file('ocr-worker.js')).href,
+      ortUrl: pathToFileURL(file('ort', 'ort.wasm.bundle.min.mjs')).href,
+      wasm, det, rec, dict,
+    };
+  } catch (err) {
+    return { error: err.code === 'ENOENT' ? 'The text recognition models are missing (run npm run fetch-ocr)' : err.message };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -603,6 +627,7 @@ function setup(options) {
     }
   });
   ipcMain.handle('screen:ocr', (_event, job) => recognize(job));
+  ipcMain.handle('screen:paddle-files', () => paddleFiles());
   ipcMain.handle('screen:ocr-status', async (_event, { start = false } = {}) => {
     if (start) await startHelper();
     return { running: !!ocr.proc && !ocr.starting, engine: ocr.engine, error: ocr.error, maxSide: ocr.maxSide, supported: !!helperCommand() };

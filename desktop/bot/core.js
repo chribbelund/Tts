@@ -119,7 +119,8 @@ const BOT_DEFAULTS = {
     highlight: true,         // a box around what's being read
     sensitivity: 'normal',   // low | normal | high: how small a change is looked at
     interval: 250,           // ms between looks at the zones
-    fastOcr: false,          // quicker, less accurate text recognition
+    ocrEngine: 'auto',       // auto | paddle | system: which text recognition (screen.js)
+    fastOcr: false,          // quicker, less accurate system text recognition
     numberKeys: true,        // Ctrl+Alt+1…9 read zone 1…9
     nav: { voice: { engine: '', voiceId: '', rate: 1.1, pitch: 1, volume: 100 }, wrap: false },
     lens: { enabled: false, follow: 'focus', zone: '', zoom: 3, width: 760, height: 280, position: 'top-right', display: '', filter: 'none', caption: true, captionSize: 30 },
