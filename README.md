@@ -105,9 +105,16 @@ git push origin v1.0.0
 ```
 
 The release also carries `latest.yml`, `latest-mac.yml` and `.blockmap` files. The app
-checks them 30 seconds after it starts and every six hours (`desktop/update-main.js`):
+checks them every time it starts, on a small splash window with a progress bar, and
+every six hours after that (`desktop/update-main.js`, `desktop/splash-main.js`):
 
-- **Windows installer:** downloads the update in the background and installs it
+- **At startup:** on the Windows installer, an update downloads and installs before the
+  app opens, which then opens on the new version by itself, like Discord. *Open without
+  updating* on the splash skips the wait (the download carries on in the background).
+  If GitHub doesn't answer within 10 seconds, or a download stops moving for 30, the app
+  opens anyway. To see the splash while working on it, run
+  `CHAT_READER_SPLASH_DEMO=1 npm start`, which plays a pretend update.
+- **Windows installer, while running:** downloads the update in the background and installs it
   silently when the app closes. *Restart to update* in the tray menu does it straight
   away: the app closes, updates and opens again, with no installer window.
 - **macOS and the Windows portable version:** shows a notice and a *Download version …*

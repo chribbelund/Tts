@@ -12,6 +12,8 @@ directories:
 files:
   - main.js
   - update-main.js
+  - splash-main.js
+  - splash/**/*
   - preload.js
   - accelerator.js
   - bot-main.js

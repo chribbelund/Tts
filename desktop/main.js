@@ -40,6 +40,7 @@ let win = null;
 let tray = null;
 let quitting = false;
 let toldAboutTray = false;
+let splashUp = false;
 let readerState = { paused: false, channel: '', where: '', waiting: 0, replay: true };
 
 // ---------------------------------------------------------------------------
@@ -134,6 +135,8 @@ function hideToTray() {
 }
 
 function showWindow() {
+  // Still on the startup splash: bring that forward instead of opening early.
+  if ((!win || win.isDestroyed()) && splashUp) return updates.focusSplash();
   if (!win || win.isDestroyed()) createWindow();
   if (IS_MAC) app.dock?.show();
   if (win.isMinimized()) win.restore();
@@ -331,21 +334,35 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', showWindow);
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     bot.setup({ getWindow: () => win });
     screenReader.setup({ getWindow: () => win });
     buildMenu();
     buildTray();
-    createWindow();
+    app.on('activate', showWindow);
     updates.setup({
       getWindow: () => win,
+      icon: ICON.isEmpty() ? undefined : ICON,
       onChange: () => {
         renderTray();
         if (win && !win.isDestroyed()) win.webContents.send('updates:changed', updates.getInfo());
       },
       beforeInstall: () => { quitting = true; },
     });
-    app.on('activate', showWindow);
+
+    // The splash checks for an update first; an update that installs restarts
+    // the app, so this only carries on when there's nothing to install.
+    splashUp = true;
+    try {
+      await updates.startup();
+    } finally {
+      splashUp = false;
+    }
+    if (quitting) return;
+    if (!win || win.isDestroyed()) createWindow();
+    // Swap the splash for the window once the window has something to show.
+    win.once('ready-to-show', updates.closeSplash);
+    setTimeout(updates.closeSplash, 5000);
   });
 
   // The tray keeps the app alive on purpose: the reader is meant to run while
