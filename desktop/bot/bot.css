@@ -199,6 +199,23 @@ p.code-box { display: block; }
 .page-part + .page-part { border-top: 1px solid var(--line); padding-top: 18px; }
 .page-part:empty { display: none; }
 
+/* Sub-pages: tabs along the top of a long page, kept in view while it scrolls. */
+.app-subnav { position: sticky; top: 0; z-index: 3; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: -8px 0 0; padding: 0; background: var(--bg); border-bottom: 1px solid var(--line); }
+.app-subnav::-webkit-scrollbar { display: none; }
+.app-subnav-btn { flex: none; border: 0; background: none; padding: 10px 12px 9px; margin-bottom: -1px; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; color: var(--muted); font: inherit; font-size: 13.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.app-subnav-btn:hover { color: var(--fg); background: var(--panel-2); }
+.app-subnav-btn:focus-visible { outline-offset: -3px; }
+.app-subnav-btn[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.app-subpage { display: flex; flex-direction: column; gap: 18px; }
+.app-sub-lead { margin: 0; font-size: 13px; }
+.app-slot { display: contents; }
+.app-subpage > .page-part + .app-slot > .page-part:not(:empty),
+.app-subpage > .app-slot + .page-part,
+.app-subpage > .app-slot + .app-slot > .page-part:not(:empty) { border-top: 1px solid var(--line); padding-top: 18px; }
+.sr-profile-row > .field { flex: 0 1 360px; }
+.sr-overview { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.sr-overview .link, .bot-section .hint .link { font-size: inherit; }
+
 /* ---------- the dashboard ---------- */
 .has-shell .layout.dash { flex: 1; max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: 16px; padding: 16px; }
 .dash-main { min-height: 0; display: flex; flex-direction: column; gap: 16px; }
@@ -234,6 +251,7 @@ p.code-box { display: block; }
 :root[data-width="narrow"] .app-nav-list + .app-nav-list { border-left: 1px solid var(--line); padding-left: 4px; }
 :root[data-width="narrow"] .app-nav-btn { white-space: nowrap; }
 :root[data-width="narrow"] .app-page { padding: 16px; }
+:root[data-width="narrow"] .app-subnav { margin-top: -4px; }
 :root[data-width="narrow"] .has-shell .layout.dash { padding: 10px; gap: 10px; }
 :root[data-width="narrow"] .dash-cards { grid-template-columns: 1fr; }
 
@@ -255,6 +273,9 @@ p.code-box { display: block; }
 [data-contrast="high"] .dash-part, [data-contrast="high"] .chatter-stat, [data-contrast="high"] .app-nav { border-width: var(--border-strong); }
 [data-contrast="high"] .app-nav-btn { color: var(--fg); }
 [data-contrast="high"] .app-nav-btn[aria-current="page"] { box-shadow: inset 3px 0 0 var(--accent); }
+[data-contrast="high"] .app-subnav-btn { color: var(--fg); }
+[data-contrast="high"] .app-subnav-btn[aria-selected="true"] { color: var(--accent); border-bottom-width: 3px; }
+[data-contrast="high"] .app-subnav { border-bottom-width: var(--border-strong); }
 /* With the bot's part the chatter dialog is a little wider, and scrolls. */
 .has-shell .chatter-dialog { width: min(500px, calc(100% - 32px)); }
 .has-shell .chatter-dialog .chatter-body { overflow-y: auto; max-height: calc(100vh / var(--ui-zoom) - 140px); }

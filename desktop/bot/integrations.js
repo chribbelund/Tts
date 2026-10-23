@@ -145,15 +145,16 @@
   // Viewer controls: rewards from the channel's list, and the answers
   // -------------------------------------------------------------------------
 
-  UI.addTab('readerLinks', 'With the bot', (panel) => {
+  UI.addTab('readerLinks', 'With the bot', (panel, show) => {
     const me = Bot.twitch.accounts.streamer;
-    panel.append(UI.section('With the bot',
+    if (show('options')) panel.append(UI.section('With the bot',
       UI.check(Bot.data, 'answerReaderCommands', 'Answer the voice and TTS commands in Twitch chat (“@alice your TTS voice is now Bella”)', { onChange: save }),
       UI.check(Bot.data.ui, 'feedActivity', 'Show follows, redemptions, polls and the bot’s notes in the chat list (they aren’t read out)', { onChange: save }),
       h('p', { class: 'hint' }, 'For a reward that reaches the reader whatever it asks for, give it effects under ',
         UI.button('Rewards', () => Bot.shell.show('rewards'), { cls: 'link' }),
         ' instead: “Change how a chatter is read” and “Speak with TTS” work there for every reward.')));
 
+    if (!show('rewards')) return;
     if (!me) {
       panel.append(h('p', { class: 'hint' }, 'Log in under ', UI.button('Accounts', () => Bot.shell.show('account'), { cls: 'link' }), ' to pick the rewards above from your channel’s list, by name, instead of redeeming each one to link it.'));
       return;

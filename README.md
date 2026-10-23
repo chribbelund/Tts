@@ -116,11 +116,17 @@ rather than by which half of the app they belong to:
 | Group | Sections |
 |---|---|
 | | **Dashboard**: the player and chat, with the stream next to them |
-| Reader | Voices, Reading, Nicknames, Filters, Viewer controls (the website's Settings, as pages) |
+| Reader | Voices, Reading, Chatters (nicknames and filters), Viewer controls (the website's Settings, as pages) |
+| Accessibility | Screen reader |
 | Bot | Commands, Events, Rewards, Timers, Effect lists, Counters |
 | Community | Viewers, Points & games, Quotes, Moderation |
 | Stream | Multistream, Overlay, OBS |
 | App | Accounts, Shortcuts & API (the reader's keys and the bot's hotkeys), Display, Backup & import |
+
+Long sections are split into tabs along the top of the page, so each part fits on the
+screen instead of being one long scroll: the Screen reader has Overview, Zones, Profiles,
+Reading cursor, Lens, Hotkeys and Speech & timing, for example. Left and right arrows move
+between the tabs, and the app remembers the one you used last on each page.
 
 A dot next to a section shows when something there needs you: logged out, OBS not
 connected, the overlay's port taken. The website is unchanged: just the reader, with its

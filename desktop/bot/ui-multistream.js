@@ -63,7 +63,7 @@
     return /\$message\b/i.test(c.prefix || '') ? head : `${head}${msg.text}`;
   }
 
-  UI.addTab('multistream', 'Multistream', (panel) => {
+  UI.addTab('multistream', 'Multistream', (panel, show) => {
     const c = ms();
     const sync = () => { save(); R.sync(); };
     const previewLine = h('p', { class: 'code-box' });
@@ -74,11 +74,11 @@
     const quota = R.quotaToday();
 
     panel.append(
-      UI.lead('Streaming on Twitch, YouTube and TikTok at once? Join the three chats: everything written on one is posted on the other two, after a prefix you choose, so viewers everywhere see the whole conversation. The combined chat can also be shown on stream.'),
-      UI.grid(statusCard('twitch'), statusCard('youtube'), statusCard('tiktok')),
-      UI.check(c, 'enabled', 'Join the chats', { onChange: () => { sync(); UI.rerender(); } }),
+      show('status') && UI.lead('Streaming on Twitch, YouTube and TikTok at once? Join the three chats: everything written on one is posted on the other two, after a prefix you choose, so viewers everywhere see the whole conversation. The combined chat can also be shown on stream.'),
+      show('status') && UI.grid(statusCard('twitch'), statusCard('youtube'), statusCard('tiktok')),
+      show('status') && UI.check(c, 'enabled', 'Join the chats', { onChange: () => { sync(); UI.rerender(); } }),
 
-      UI.section('Your channels',
+      show('channels') && UI.section('Your channels',
         UI.row(
           h('div', { class: 'field' }, h('span', { class: 'row-label' }, 'Twitch'), h('span', {}, Bot.twitch.loggedIn() ? `#${Bot.twitch.streamerLogin()} (your login)` : 'Log in under Accounts')),
           UI.field('YouTube channel or stream', UI.text(c, 'youtube', { placeholder: '@handle or a link to the stream', onChange: save })),
@@ -86,7 +86,7 @@
         ),
         h('p', { class: 'hint' }, 'If the top bar already reads the same YouTube or TikTok channel, the relay uses that connection; otherwise it opens its own. Before you go live it waits for the stream to start.')),
 
-      UI.section('How relayed messages look',
+      show('look') && UI.section('How relayed messages look',
         UI.field('Prefix', UI.text(c, 'prefix', { vars: true, extraVars: [['platform', 'Where it was written'], ['message', 'The message (leave it out and it goes at the end)']], onChange: () => { save(); showPreview(); } }),
           'Put before every relayed message. $platform is the name below, $user who wrote it.'),
         h('div', { class: 'field' }, h('span', { class: 'row-label' }, 'Looks like'), previewLine),
@@ -99,13 +99,13 @@
         UI.check(c, 'relayEvents', 'Also relay subs, cheers, raids, Super Chats, memberships and gifts as one short line', { onChange: save }),
         UI.field('Never relay these chatters', UI.text(c, 'ignoreUsers', { onChange: save }), 'Other bots, separated by commas. The relay’s own posts are always recognised and never sent round again.')),
 
-      UI.section('Posting on Twitch',
+      show('twitch') && UI.section('Posting on Twitch',
         UI.check(c, 'sendTwitch', 'Post YouTube and TikTok chat in my Twitch chat', { onChange: save }),
         Bot.twitch.accounts.bot
           ? UI.field('Post as', UI.select(c, 'twitchAs', [['auto', 'Same as the bot’s replies'], ['bot', Bot.twitch.accounts.bot.displayName], ['streamer', 'Me']], { onChange: save }))
           : h('p', { class: 'hint' }, 'Posted as you. Log in a bot account under Accounts to post as the bot instead. Make the bot a mod (/mod name) so Twitch lets it post quickly.')),
 
-      UI.section('Posting on YouTube',
+      show('youtube') && UI.section('Posting on YouTube',
         UI.check(c, 'sendYoutube', 'Post Twitch and TikTok chat in my YouTube chat', { onChange: () => { save(); UI.rerender(); } }),
         h('details', { class: 'fx-more', open: !R.youtube.account ? true : null },
           h('summary', {}, 'Setting up YouTube posting (once)'),
@@ -136,7 +136,7 @@
           h('span', { class: 'hint' }, `Quota used today: ${quota.toLocaleString()} of ${R.YT_DAILY.toLocaleString()} (about ${Math.max(0, Math.floor((R.YT_DAILY - quota) / R.YT_UNITS.insert))} posts left)`),
           h('progress', { max: R.YT_DAILY, value: Math.min(quota, R.YT_DAILY), 'aria-label': 'YouTube quota used today' }))),
 
-      UI.section('Posting on TikTok (experimental)',
+      show('tiktok') && UI.section('Posting on TikTok (experimental)',
         h('p', { class: 'warn' }, 'TikTok has no way for apps to post in a LIVE chat. This goes through Euler Stream, the service the app already uses to read TikTok chat: it needs an Euler Stream API key that may post (a paid plan there) and your TikTok session cookies, and both are sent to Euler Stream. Use a second TikTok account for this if you can. It may stop working whenever TikTok changes something.'),
         UI.check(c, 'sendTiktok', 'Post Twitch and YouTube chat in my TikTok LIVE chat', { onChange: save }),
         UI.row(
@@ -145,19 +145,19 @@
         tiktokSessionFields(),
         UI.field('Seconds between TikTok posts', UI.number(c, 'tiktokBatch', { min: 2, max: 120, onChange: save }), 'TikTok comments are at most 150 characters; messages in between go out together.')),
 
-      UI.section('Chat on stream',
+      show('stream') && UI.section('Chat on stream',
         UI.check(c, 'overlayChat', 'Show the three chats together in an overlay', { onChange: save }),
         h('p', { class: 'hint' }, 'Add it to OBS as another Browser source. For a vertical TikTok layout, make it narrow and tall. Options: &max= messages shown, &fade= seconds before one disappears, &size= text size in pixels, &badges=0 to hide the platform tags, &platforms=youtube,tiktok to show only some.'),
         UI.row(h('code', { class: 'code-box' }, overlayUrl), UI.copyButton(() => overlayUrl), UI.button('Customize it', () => UI.open('overlay')))),
 
-      UI.section('Try it',
+      show('test') && UI.section('Try it',
         UI.row(UI.button('Send test messages', () => { R.test(); UI.say(testStatus, 'Sent one made-up message from each platform through the relay. Check your chats and the overlay.'); })),
         testStatus),
 
-      h('details', { class: 'fx-more' }, h('summary', {}, 'Streaming the video to all three'),
+      show('video') && h('details', { class: 'fx-more' }, h('summary', {}, 'Streaming the video to all three'),
         h('p', { class: 'hint' }, 'This app joins the chats; the video itself goes out from OBS. Either add each platform as its own output with the free “Multiple RTMP outputs” plugin (obs-multi-rtmp) — Twitch and YouTube stream keys from their dashboards, TikTok’s server URL and key from TikTok LIVE Producer if your account has LIVE access — or use a restream service. For TikTok’s vertical video, the Aitum Vertical plugin gives OBS a second, vertical canvas.')),
     );
-    showPreview();
+    if (show('look')) showPreview();
   }, { listens: ['relay', 'eventsub', 'accounts', 'overlay'], after: 'events' });
 
   function tiktokSessionFields() {

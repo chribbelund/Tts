@@ -500,10 +500,10 @@
     });
   }
 
-  UI.addTab('hotkeys', 'Hotkeys & API', (panel) => {
+  UI.addTab('hotkeys', 'Hotkeys & API', (panel, show) => {
     const problems = Bot.host.hotkeyProblems();
-    panel.append(UI.section('Bot hotkeys',
-      UI.lead('Keys that run effects, working while a game is focused, like the reader’s shortcuts above. An ordinary key needs a modifier such as Alt; F-keys can be used alone.'),
+    if (show('hotkeys')) panel.append(UI.section('Bot hotkeys',
+      UI.lead('Keys that run effects, working while a game is focused, like the reader’s shortcuts. An ordinary key needs a modifier such as Alt; F-keys can be used alone.'),
       UI.row(UI.button('+ New hotkey', () => editHotkey(Bot.hotkeys.newHotkey(), true), { cls: 'btn small primary' })),
       UI.table(
         [{ label: 'On', cls: 'c-on' }, { label: 'Name' }, { label: 'Keys' }, { label: 'Effects', cls: 'num' }, { label: '', cls: 'c-act' }],
@@ -523,6 +523,7 @@
         { empty: 'No hotkeys yet.' },
       )));
 
+    if (!show('api')) return;
     const base = (Bot.overlayStatus && Bot.overlayStatus.url) || `http://127.0.0.1:${Bot.data.overlay.port}/`;
     const keyBox = h('code', { class: 'code-box' }, Bot.data.overlay.apiKey);
     panel.append(UI.section('HTTP API (Stream Deck and other tools)',
@@ -590,7 +591,12 @@
   // Viewers
   // -------------------------------------------------------------------------
 
-  UI.addTab('viewers', 'Viewers', (panel) => {
+  UI.addTab('viewers', 'Viewers', (panel, show) => {
+    if (show('list')) viewerList(panel);
+    if (show('roles')) rolesSection(panel);
+  }, { listens: ['viewers'] });
+
+  function viewerList(panel) {
     const q = UI.viewerQuery || { text: '', sort: 'lastSeen' };
     UI.viewerQuery = q;
     const all = Object.values(Bot.viewers.users);
@@ -636,8 +642,9 @@
       tableBox,
     );
     draw();
+  }
 
-    // Custom roles.
+  function rolesSection(panel) {
     const role = { name: '' };
     panel.append(UI.section('Custom roles',
       UI.lead('Named lists of viewers, for commands only they can use (pick the role under “Who can use it”).'),
@@ -654,13 +661,13 @@
         save();
         UI.rerender();
       }))));
-  }, { listens: ['viewers'] });
+  }
 
   // -------------------------------------------------------------------------
   // Points and games
   // -------------------------------------------------------------------------
 
-  UI.addTab('points', 'Points & games', (panel) => {
+  UI.addTab('points', 'Points & games', (panel, show) => {
     const cur = Bot.data.currency;
     const g = Bot.data.games;
     const game = (key, title, extra = []) => {
@@ -682,7 +689,7 @@
     const raffle = Bot.games.raffle;
     const rStatus = UI.status();
     panel.append(
-      UI.section('Points',
+      show('points') && UI.section('Points',
         UI.check(cur, 'enabled', 'Give viewers points for watching', { onChange: () => { save(); UI.rerender(); } }),
         UI.row(
           UI.field('They’re called', UI.text(cur, 'name', { onChange: save })),
@@ -696,9 +703,9 @@
         UI.check(cur, 'whileOffline', 'Also while you’re offline', { onChange: save }),
         UI.check(cur, 'activeOnly', 'Only for viewers who chatted in the last 15 minutes', { onChange: save }),
         h('p', { class: 'hint' }, `Viewers check theirs with !${cur.name.toLowerCase().replace(/\s+/g, '')} (rename it under Commands → Built in) and the leaderboard with !top. Give points with the “Change points” effect, e.g. for a follow or a cheer.`)),
-      game('slots', 'Slots', [UI.field('Symbols', UI.text(g.slots, 'symbols', { onChange: save }))]),
-      game('gamble', 'Gamble'),
-      game('heist', 'Heist', [
+      show('games') && game('slots', 'Slots', [UI.field('Symbols', UI.text(g.slots, 'symbols', { onChange: save }))]),
+      show('games') && game('gamble', 'Gamble'),
+      show('games') && game('heist', 'Heist', [
         UI.row(
           UI.field('Seconds to join', UI.number(g.heist, 'joinSeconds', { min: 10, max: 600, onChange: save })),
           UI.field('Fewest people', UI.number(g.heist, 'minUsers', { min: 1, max: 100, onChange: save })),
@@ -708,7 +715,7 @@
         UI.field('When some win', UI.text(g.heist, 'successText', { vars: true, extraVars: [['winners', 'Who won what']], onChange: save })),
         UI.field('When everyone loses', UI.text(g.heist, 'failText', { vars: true, onChange: save })),
       ]),
-      UI.section('Raffle',
+      show('raffle') && UI.section('Raffle',
         UI.lead('Open entries, let chat join with a command, then draw. Mods can also type !raffle start <prize>, !raffle close and !raffle draw.'),
         UI.row(
           UI.field('Command to enter', UI.text(g.raffle, 'trigger', { onChange: save })),
@@ -772,13 +779,13 @@
   // Moderation
   // -------------------------------------------------------------------------
 
-  UI.addTab('moderation', 'Moderation', (panel) => {
+  UI.addTab('moderation', 'Moderation', (panel, show) => {
     const m = Bot.data.moderation;
     const rule = (key, label, fields) => h('div', { class: 'bot-rule' }, UI.check(m[key], 'enabled', label, { onChange: save }), fields ? UI.row(...fields) : null);
     const test = { text: '' };
     const tStatus = UI.status();
-    panel.append(
-      UI.needsLogin() || '',
+    panel.append(UI.needsLogin() || '');
+    if (show('general')) panel.append(
       UI.lead('The bot deletes or times out messages that break your rules, on your Twitch chat. Mods and you are never moderated.'),
       UI.check(m, 'enabled', 'Moderate my chat', { onChange: save }),
       UI.row(
@@ -787,12 +794,13 @@
         UI.field('Timeout (s)', UI.number(m, 'timeoutSeconds', { min: 1, max: 1209600, onChange: save })),
       ),
       UI.check(m, 'escalate', 'Be stricter with repeat offenders: the first time deletes, after that timeouts get longer', { onChange: save }),
-      UI.field('Warning in chat (empty = none)', UI.text(m, 'warnText', { vars: true, extraVars: [['reason', 'Why']], onChange: save })),
-      UI.section('Banned words',
+      UI.field('Warning in chat (empty = none)', UI.text(m, 'warnText', { vars: true, extraVars: [['reason', 'Why']], onChange: save })));
+    panel.append(
+      show('words') && UI.section('Banned words',
         UI.field('Words and phrases, one per line. * matches the rest of a word: “idiot*”', UI.text(m, 'bannedWords', { multiline: true, rows: 4, onChange: save })),
         UI.field('Regular expressions, one per line', UI.text(m, 'bannedRegex', { multiline: true, rows: 2, onChange: save })),
         UI.field('For banned words', UI.select(m, 'bannedAction', [['delete', 'Delete the message'], ['timeout', 'Time them out'], ['ban', 'Ban them']], { onChange: save }))),
-      UI.section('Rules',
+      show('rules') && UI.section('Rules',
         rule('links', 'No links, unless permitted', [
           UI.field('Always allowed (start of the address, separated by spaces)', UI.text(m.links, 'allowed', { onChange: save })),
           UI.field('Permit command', UI.text(m.links, 'permitTrigger', { onChange: save })),
@@ -812,7 +820,7 @@
           UI.field('Times', UI.number(m.repeats, 'count', { min: 2, max: 20, onChange: save })),
           UI.field('Within (s)', UI.number(m.repeats, 'seconds', { min: 5, max: 600, onChange: save })),
         ])),
-      UI.section('Try a message',
+      show('test') && UI.section('Try a message',
         UI.row(UI.text(test, 'text', { placeholder: 'Type a message to check' }), UI.button('Check', async () => {
           const p = await Bot.moderation.test(test.text);
           UI.say(tStatus, p ? `Would be moderated: ${p.reason}` : 'That one is fine.', !!p);
@@ -928,7 +936,7 @@
   // For the other tab files (the Song requests page).
   Object.assign(UI, { overlayPreview, overlayBase, linkBuilder });
 
-  UI.addTab('overlay', 'Overlay', (panel) => {
+  UI.addTab('overlay', 'Overlay', (panel, show) => {
     const o = Bot.data.overlay;
     const s = Bot.overlayStatus || {};
     const status = UI.status();
@@ -1020,14 +1028,14 @@
     panel.append(
       h('datalist', { id: 'overlay-fonts' }, FONTS.map((f) => h('option', { value: f }))),
       h('datalist', { id: 'overlay-instance-names' }, o.instances.map((i) => h('option', { value: i.name }))),
-      UI.lead('Alerts, pictures, videos, text and counters appear on stream through an overlay: a web page OBS shows as a browser source.'),
-      h('div', { class: 'bot-card', 'data-state': s.running ? 'on' : s.error ? 'error' : '' },
+      show('status') && UI.lead('Alerts, pictures, videos, text and counters appear on stream through an overlay: a web page OBS shows as a browser source.'),
+      show('status') && h('div', { class: 'bot-card', 'data-state': s.running ? 'on' : s.error ? 'error' : '' },
         h('div', { class: 'bot-card-title' }, 'Overlay'),
         h('div', { class: 'bot-card-value' }, s.running ? `Running · ${plural(s.clients || 0, 'overlay')} open` : 'Not running'),
         s.error ? h('div', { class: 'hint bad' }, s.error) : null),
-      UI.check(o, 'enabled', 'Run the overlay', { onChange: async () => { save(); await Bot.applyOverlay(); UI.rerender(); } }),
-      UI.row(UI.field('Port', UI.number(o, 'port', { min: 1024, max: 65535 })), UI.button('Apply', async () => { save(); await Bot.applyOverlay(); UI.rerender(); })),
-      UI.section('Add it to OBS',
+      show('status') && UI.check(o, 'enabled', 'Run the overlay', { onChange: async () => { save(); await Bot.applyOverlay(); UI.rerender(); } }),
+      show('status') && UI.row(UI.field('Port', UI.number(o, 'port', { min: 1024, max: 65535 })), UI.button('Apply', async () => { save(); await Bot.applyOverlay(); UI.rerender(); })),
+      show('obs') && UI.section('Add it to OBS',
         h('ol', { class: 'bot-steps' },
           h('li', {}, 'In OBS, add a source: + → Browser.'),
           h('li', {}, 'URL: ', h('code', { class: 'code-box' }, url), ' ', UI.copyButton(() => url)),
@@ -1035,7 +1043,7 @@
           h('li', {}, 'Put it on top of your scenes. Every alert, picture, video and text shows up there.')),
         UI.row(UI.button('Open it in the browser', () => Bot.desktop.openOverlay()), UI.button('Send a test alert', testAlert), UI.button('Send test text', () => testText())),
         status),
-      UI.section('Style',
+      show('style') && UI.section('Style',
         UI.lead('How alerts, text, counters and the combined chat look on every overlay. Changes show up straight away, without refreshing OBS. Alerts and text set to their own colours in an effect keep them.'),
         h('div', { class: 'overlay-builder' },
           h('div', { class: 'overlay-builder-controls' },
@@ -1047,19 +1055,19 @@
               UI.rerender();
             }))),
           mainPreview),
-        h('p', { class: 'hint' }, 'Fonts must be installed on this computer. The preview shows what is sent to every overlay: use the test buttons above.')),
-      UI.section('Custom CSS',
+        h('p', { class: 'hint' }, 'Fonts must be installed on this computer. The preview shows what is sent to every overlay: use the test buttons under Setup.')),
+      show('css') && UI.section('Custom CSS',
         UI.text(o, 'css', { multiline: true, rows: 8, placeholder: '.alert-title { letter-spacing: 2px; }', onChange: () => styleChanged(false) }),
         h('p', { class: 'hint' }, CSS_HINT)),
-      UI.section('Instances',
+      show('instances') && UI.section('Instances',
         UI.lead('Several overlays can show different things: add ?instance=name to the URL (e.g. one for alerts, one for a camera frame) and pick that instance in an effect’s “More options”. An effect with no instance shows on every overlay. Add an instance here to give it its own style.'),
         UI.row(instanceInput, UI.button('+ Add instance', addInstance, { cls: 'btn small primary' })),
         instanceList),
-      UI.section('Combined chat on stream',
+      show('chat') && UI.section('Combined chat on stream',
         UI.lead('Twitch, YouTube and TikTok chat together (set up under Multistream). Pick the options, then copy the link into an OBS Browser source.'),
         running ? chat.node : notRunning()),
-      UI.section('Counter on stream',
-        UI.lead('A counter alone, updating live. Leave a box empty to use the style above.'),
+      show('counter') && UI.section('Counter on stream',
+        UI.lead('A counter alone, updating live. Leave a box empty to use the overlay’s style.'),
         running ? counter.node : notRunning()),
     );
   }, { listens: ['overlay'] });
@@ -1174,11 +1182,11 @@
     });
   }
 
-  UI.addTab('account', 'Accounts', (panel) => {
+  UI.addTab('account', 'Accounts', (panel, show) => {
     const d = Bot.data;
     const clientInput = UI.text(d, 'clientId', { placeholder: 'e.g. abcd1234efgh5678…', onChange: () => { d.clientId = d.clientId.trim(); save(); } });
     clientInput.addEventListener('change', UI.rerender);
-    panel.append(
+    if (show('login')) panel.append(
       h('div', { class: 'bot-account setup-again' },
         h('div', {}, h('strong', {}, 'Setup guide'), h('div', { class: 'hint' }, 'Step by step through the Twitch application, logging in, your chats, the voice, OBS and the shortcuts.')),
         UI.button('Run the setup guide', () => Bot.setup.open(), { cls: 'btn small' })),
@@ -1191,7 +1199,8 @@
           h('li', {}, 'Category: Chat Bot. Client Type: ', h('strong', {}, 'Public'), '.'),
           h('li', {}, 'Create, then Manage, and copy the Client ID into this box:')),
         UI.field('Client ID', clientInput)),
-      UI.section('2. Log in', accountBox('streamer'), accountBox('bot')),
+      UI.section('2. Log in', accountBox('streamer'), accountBox('bot')));
+    if (show('chat')) panel.append(
       UI.section('Chat',
         Bot.twitch.accounts.bot ? UI.field('Replies are sent as', UI.select(d, 'replyAs', [['bot', Bot.twitch.accounts.bot.displayName], ['streamer', 'Me']], { onChange: save })) : null,
         UI.check(d, 'readBotMessages', 'Read the bot’s own chat messages out loud', { onChange: save }),
@@ -1200,6 +1209,7 @@
     );
 
     // Where the bot's sounds play.
+    if (!show('sounds')) return;
     const sound = Bot.data.sound;
     const device = h('select', { 'aria-label': 'Sound output' });
     UI.options(device, [['', 'The system’s default output']], sound.device);
@@ -1218,32 +1228,34 @@
   // Backup & import: under the reader's own Backup section, on the same page
   // -------------------------------------------------------------------------
 
-  UI.addTab('import', 'Import', (panel) => {
-    panel.append(UI.section('What the backup holds',
+  UI.addTab('import', 'Import', (panel, show) => {
+    if (show('holds')) panel.append(UI.section('What the backup holds',
       UI.lead('In the desktop app the file holds the reader’s settings and the whole bot: commands, events, timers, effect lists, counters, quotes, multistream and the rest. Your logins are never in it.'),
       UI.check(Bot.data.ui, 'backupViewers', 'Include the viewer list, with points and watch time', { onChange: save })));
     const iStatus = UI.status();
-    if (UI.importNote) UI.say(iStatus, UI.importNote);
-    const runImport = (kind) => async (e) => {
-      const button = e.currentTarget;
-      UI.importNote = '';
-      UI.say(iStatus, 'Reading…');
-      const result = await UI.busy(button, () => Bot.importers.read(kind), iStatus);
-      if (!result) { if (!iStatus.classList.contains('bad')) UI.say(iStatus, ''); return; }
-      UI.say(iStatus, '');
-      showImport(result, iStatus);
-    };
-    panel.append(UI.section('Import from another bot',
-      UI.lead('Brings over commands, events, timers, effect lists, counters, quotes, roles, hotkeys and viewers with their points. Nothing here is replaced: a command that already exists is skipped. You see what was found before anything is added.'),
-      UI.row(
-        UI.button('Firebot profile folder…', runImport('firebot-folder')),
-        UI.button('Firebot setup file…', runImport('firebot-setup')),
-        UI.button('Mix It Up backup or file…', runImport('mixitup')),
-      ),
-      h('p', { class: 'hint' }, 'Firebot: pick Firebot/v5/profiles in your app data folder (Windows: %APPDATA%\\Firebot, macOS: ~/Library/Application Support/Firebot), or a .firebotsetup you exported. Mix It Up: make a backup under Settings → Advanced → Backup Settings and pick the .miubackup, or pick exported .miucommand files. Pictures and sounds stay where they are on disk, so effects that use them work as long as the files are still there.'),
-      iStatus));
+    if (show('import')) {
+      if (UI.importNote) UI.say(iStatus, UI.importNote);
+      const runImport = (kind) => async (e) => {
+        const button = e.currentTarget;
+        UI.importNote = '';
+        UI.say(iStatus, 'Reading…');
+        const result = await UI.busy(button, () => Bot.importers.read(kind), iStatus);
+        if (!result) { if (!iStatus.classList.contains('bad')) UI.say(iStatus, ''); return; }
+        UI.say(iStatus, '');
+        showImport(result, iStatus);
+      };
+      panel.append(UI.section('Import from another bot',
+        UI.lead('Brings over commands, events, timers, effect lists, counters, quotes, roles, hotkeys and viewers with their points. Nothing here is replaced: a command that already exists is skipped. You see what was found before anything is added.'),
+        UI.row(
+          UI.button('Firebot profile folder…', runImport('firebot-folder')),
+          UI.button('Firebot setup file…', runImport('firebot-setup')),
+          UI.button('Mix It Up backup or file…', runImport('mixitup')),
+        ),
+        h('p', { class: 'hint' }, 'Firebot: pick Firebot/v5/profiles in your app data folder (Windows: %APPDATA%\\Firebot, macOS: ~/Library/Application Support/Firebot), or a .firebotsetup you exported. Mix It Up: make a backup under Settings → Advanced → Backup Settings and pick the .miubackup, or pick exported .miucommand files. Pictures and sounds stay where they are on disk, so effects that use them work as long as the files are still there.'),
+        iStatus));
+    }
 
-    panel.append(UI.section('Start over',
+    if (show('reset')) panel.append(UI.section('Start over',
       UI.lead('Deletes every command, event, timer, effect list, counter and quote. Your logins, the reader’s settings and the viewer list stay.'),
       UI.row(UI.button('Start the bot over…', () => {
         if (!confirm('Delete every command, event, timer, effect list, counter and quote? Your login, the reader’s settings and the viewer list stay.')) return;

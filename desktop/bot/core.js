@@ -163,6 +163,7 @@ const BOT_DEFAULTS = {
   },
   ui: {
     tab: 'dashboard',
+    subs: {},                // the sub-page last shown on each page that has them (shell.js)
     feedActivity: true,      // follows, redemptions and the rest as lines in the chat list
     backupViewers: true,     // backups include the viewer list
     setupDone: false,        // the setup guide was finished or closed (setup.js)
