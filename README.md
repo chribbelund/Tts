@@ -35,7 +35,11 @@ Download the build for your system from the
 | System | File |
 |---|---|
 | macOS (Intel and Apple silicon) | `chat-reader-<version>-mac-universal.dmg`, or the `.zip` |
-| Windows | `...-setup.exe`, or `...-portable.exe` to run it without installing |
+| Windows | `chat-reader-<version>-win.exe`, or `...-portable.exe` to run it without installing |
+
+On Windows the installer has no steps to click through: it installs for your user
+account (no admin prompt) and opens Chat Reader straight away, like Discord. It keeps
+itself up to date from then on.
 
 There's no Linux build; run the page in a browser there, or build it yourself with
 `npx electron-builder --linux` after adding a `linux` section to
@@ -103,8 +107,9 @@ git push origin v1.0.0
 The release also carries `latest.yml`, `latest-mac.yml` and `.blockmap` files. The app
 checks them 30 seconds after it starts and every six hours (`desktop/update-main.js`):
 
-- **Windows installer:** downloads the update in the background and installs it on the
-  next start, or right away from *Restart to update* in the tray menu.
+- **Windows installer:** downloads the update in the background and installs it
+  silently when the app closes. *Restart to update* in the tray menu does it straight
+  away: the app closes, updates and opens again, with no installer window.
 - **macOS and the Windows portable version:** shows a notice and a *Download version …*
   tray item that opens the release page. macOS only lets signed apps replace
   themselves, and the portable version has nowhere to install to.

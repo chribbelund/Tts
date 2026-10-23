@@ -1,7 +1,8 @@
 // Updates from GitHub releases.
 //
-// Windows installer: downloads in the background and installs on the next
-// restart (or straight away from the tray). macOS won't let an unsigned app
+// Windows installer: downloads in the background and installs silently when
+// the app quits, or straight away from the tray (it closes, updates and opens
+// again on its own, with no installer window). macOS won't let an unsigned app
 // replace itself, and the portable .exe has nowhere to install to, so those
 // only say a new version is out and link to the release page.
 //
@@ -135,7 +136,7 @@ function setup(options = {}) {
     set({ status: 'ready', version: info.version });
     if (toldAbout === info.version) return;
     toldAbout = info.version;
-    notify('Chat Reader update ready', `Version ${info.version} installs the next time Chat Reader starts. Use the tray menu to restart now.`);
+    notify('Chat Reader update ready', `Version ${info.version} installs when Chat Reader closes. Choose Restart to update in the tray menu to do it now.`);
   });
 
   autoUpdater.on('error', (err) => {
@@ -216,7 +217,8 @@ function installNow() {
   if (!autoUpdater || state.status !== 'ready') return;
   // Tell main.js we're quitting so closing the window doesn't offer the tray instead.
   beforeInstall();
-  setImmediate(() => autoUpdater.quitAndInstall(false, true));
+  // Silent: no installer window. Then open the new version.
+  setImmediate(() => autoUpdater.quitAndInstall(true, true));
 }
 
 // Tray/menu entry describing where the update stands.

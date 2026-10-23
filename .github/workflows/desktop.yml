@@ -115,9 +115,9 @@ jobs:
             | Platform | Download |
             |---|---|
             | macOS (Intel and Apple silicon) | `.dmg`, or `.zip` |
-            | Windows | `*-setup.exe` (installer) or `*-portable.exe` |
+            | Windows | `chat-reader-*-win.exe` (installs in one click) or `*-portable.exe` |
 
-            Already installed? The Windows installer version updates itself. On macOS and the portable version, Chat Reader tells you when a new version is out.
+            Already installed? The installed Windows version updates itself in the background. On macOS and the portable version, Chat Reader tells you when a new version is out.
 
             The builds are not code-signed, so the first launch needs one extra step:
 

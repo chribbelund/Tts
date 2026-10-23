@@ -2606,7 +2606,7 @@ function showUpdates(info) {
   const text = !info.enabled ? 'Updates are only checked in the installed app.'
     : info.status === 'checking' ? 'Checking for updates…'
     : info.status === 'downloading' ? `Downloading version ${info.version}… ${info.percent}%`
-    : info.status === 'ready' ? `Version ${info.version} installs the next time Chat Reader starts.`
+    : info.status === 'ready' ? `Version ${info.version} installs when Chat Reader closes.`
     : info.status === 'available' ? `Version ${info.version} is out.`
     : info.status === 'error' ? 'Couldn’t check for updates. It tries again later.'
     : '';

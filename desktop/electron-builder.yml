@@ -61,11 +61,17 @@ win:
     - target: portable
       arch: [x64]
 
+# One click, like Discord: no wizard. It installs for the current user (no
+# admin prompt) into %LOCALAPPDATA%\Programs and opens the app straight away.
+# Updates run the same installer silently from inside the app (update-main.js).
 nsis:
-  oneClick: false
+  oneClick: true
   perMachine: false
-  allowToChangeInstallationDirectory: true
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
   shortcutName: Chat Reader
+  deleteAppDataOnUninstall: false
 
 portable:
   artifactName: chat-reader-${version}-windows-portable.${ext}
