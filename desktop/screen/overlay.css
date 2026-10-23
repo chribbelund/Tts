@@ -39,6 +39,21 @@ body.editor { background: rgba(0, 0, 0, 0.18); cursor: crosshair; }
 .editor .zone { cursor: move; background: rgba(255, 255, 255, 0.04); }
 .editor .zone.selected { background: rgba(255, 255, 255, 0.10); box-shadow: 0 0 0 4px var(--paper), 0 0 0 7px var(--ink); }
 
+/* Small boxes (a cooldown number, a potion count): a thin line just outside,
+   so the number inside stays in sight, and one handle at the corner. */
+.zone.tiny {
+  border: 0;
+  outline: 2px solid var(--c, #4fc3ff);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px rgba(0, 0, 0, 0.75);
+  border-radius: 2px;
+}
+.editor .zone.tiny, .editor .zone.tiny.selected { background: transparent; }
+.editor .zone.tiny.selected { outline-color: var(--paper); box-shadow: 0 0 0 6px var(--ink), 0 0 0 8px var(--c, #4fc3ff); }
+.zone.tiny .handle { display: none; }
+.zone.tiny.selected .handle[data-h="se"]:not([hidden]) { display: block; width: 14px; height: 14px; margin: 4px 0 0 4px; }
+.zone.tiny .zone-label { left: -8px; margin-bottom: 10px; font-size: 15px; }
+
 .zone-label {
   position: absolute;
   left: -4px;
@@ -110,7 +125,7 @@ body.editor { background: rgba(0, 0, 0, 0.18); cursor: crosshair; }
 .tb-pos { color: #bdbdc8; font-variant-numeric: tabular-nums; }
 .tb-spacer { flex: 1; }
 .toolbar label { font-weight: 600; }
-.toolbar input {
+.toolbar input, .toolbar select {
   flex: 1;
   min-width: 160px;
   padding: 6px 10px;

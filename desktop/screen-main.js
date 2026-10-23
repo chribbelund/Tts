@@ -204,7 +204,7 @@ function startHelper() {
   return ocr.starting;
 }
 
-async function recognize({ image, fast = false, langs = [] } = {}) {
+async function recognize({ image, fast = false, digits = false, langs = [] } = {}) {
   if (!(image instanceof Uint8Array) || !image.length) return { error: 'No picture to read' };
   if (image.length > MAX_IMAGE_BYTES) return { error: 'The picture is too big to read' };
   const ok = await startHelper();
@@ -220,7 +220,7 @@ async function recognize({ image, fast = false, langs = [] } = {}) {
       stopHelper();
     }, timeout);
     ocr.pending.set(id, { resolve, timer });
-    const job = { id, png: Buffer.from(image.buffer, image.byteOffset, image.byteLength).toString('base64'), fast: !!fast };
+    const job = { id, png: Buffer.from(image.buffer, image.byteOffset, image.byteLength).toString('base64'), fast: !!fast, digits: !!digits };
     if (Array.isArray(langs) && langs.length) job.langs = langs.filter((l) => /^[\w-]{2,20}$/.test(l)).slice(0, 8);
     ocr.proc.stdin.write(`${JSON.stringify(job)}\n`);
   });
@@ -249,7 +249,10 @@ function overlayWindow(role, bounds, { interactive = false } = {}) {
     movable: false,
     minimizable: false,
     maximizable: false,
-    fullscreenable: false,
+    // On Windows the editor goes full screen, the one way to get above the taskbar.
+    fullscreenable: IS_WIN && role === 'editor',
+    // Without the resizable frame Windows doesn't keep the window off the taskbar.
+    thickFrame: false,
     skipTaskbar: true,
     focusable: interactive,
     roundedCorners: false,
@@ -278,6 +281,33 @@ function sendWhenReady(win, channel, payload) {
   else win.webContents.send(channel, payload);
 }
 
+// Where the screen is inside a window, in the window's own pixels. A window
+// meant to cover a screen can end up smaller (Windows keeps windows off the
+// taskbar, macOS off the menu bar); the zones are fractions of the screen, so
+// the window draws them where they are on the screen, not stretched over
+// itself.
+function sendFrame(win, displayId) {
+  if (!win || win.isDestroyed()) return;
+  const d = findDisplay(displayId).bounds;
+  const c = win.getContentBounds();
+  sendWhenReady(win, 'screen-overlay:frame', { x: d.x - c.x, y: d.y - c.y, width: d.width, height: d.height });
+}
+
+function trackFrame(win, displayId) {
+  const send = () => sendFrame(win, displayId);
+  for (const type of ['show', 'resize', 'move', 'enter-full-screen']) win.on(type, send);
+  win.webContents.on('did-finish-load', send);
+}
+
+// Puts a window over all of a screen, taskbar and menu bar included.
+function coverDisplay(win, display) {
+  if (!win || win.isDestroyed()) return;
+  win.setBounds(display.bounds);
+  floatOnTop(win);
+  win.moveTop();
+  sendFrame(win, displayKey(display));
+}
+
 // The outlines of the zones and the box around what's being read. Never takes
 // the mouse or the keyboard.
 const markers = { win: null, display: '', state: null };
@@ -294,10 +324,11 @@ function updateMarkers(state) {
     if (markers.win && !markers.win.isDestroyed()) markers.win.destroy();
     markers.win = overlayWindow('markers', display.bounds);
     markers.display = displayKey(display);
+    trackFrame(markers.win, markers.display);
   }
   markers.win.setBounds(display.bounds);
   sendWhenReady(markers.win, 'screen-overlay:state', state);
-  if (!markers.win.isVisible()) markers.win.showInactive();
+  if (!markers.win.isVisible()) { markers.win.showInactive(); coverDisplay(markers.win, display); }
 }
 
 // The zone editor: covers one screen and takes the mouse and keyboard until
@@ -318,7 +349,7 @@ function closeEditor(result) {
   if (resolve) resolve(result);
 }
 
-function openEditor({ display: displayId, zones = [], selected = '', hideMain = false } = {}) {
+function openEditor({ display: displayId, zones = [], modes = [], selected = '', hideMain = false } = {}) {
   if (editor.win) closeEditor({ canceled: true });
   const display = findDisplay(displayId);
   return new Promise((resolve) => {
@@ -332,15 +363,23 @@ function openEditor({ display: displayId, zones = [], selected = '', hideMain = 
     if (markers.win && !markers.win.isDestroyed()) markers.win.hide();
     const win = overlayWindow('editor', display.bounds, { interactive: true });
     editor.win = win;
+    trackFrame(win, displayKey(display));
     sendWhenReady(win, 'screen-overlay:state', {
       role: 'editor',
       display: displayKey(display),
       size: display.bounds,
       zones: Array.isArray(zones) ? zones.slice(0, 50) : [],
+      modes: Array.isArray(modes) ? modes.slice(0, 20) : [],
       selected,
       platform: process.platform,
     });
-    win.once('ready-to-show', () => { win.show(); win.focus(); });
+    win.once('ready-to-show', () => {
+      win.show();
+      coverDisplay(win, display);
+      // The taskbar stays above any window that isn't full screen.
+      if (IS_WIN) win.setFullScreen(true);
+      win.focus();
+    });
     win.on('closed', () => { if (editor.win === win) closeEditor({ canceled: true }); });
   });
 }
@@ -588,6 +627,7 @@ function setup(options) {
   for (const type of ['display-added', 'display-removed', 'display-metrics-changed']) {
     screen.on(type, () => {
       notifyPage('displays', displayList());
+      if (markers.win && !markers.win.isDestroyed()) sendFrame(markers.win, markers.display);
       if (markers.state) updateMarkers(markers.state);
       if (lens.state) updateLens(lens.state);
     });

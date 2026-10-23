@@ -334,7 +334,14 @@ ways in, all under *Accessibility → Screen reader*:
   | When it changes | Subtitles, dialogue, objectives | The whole text, once, when it's new. Text typed out a letter at a time is read once it settles, and only the new part |
   | New lines | Logs, notifications, game chat | Only lines that weren't there before |
   | Highlighted line | Menus, dialogue choices | The line that stands out by colour or brightness, each time it moves |
+  | Cooldown | Ability icons (League of Legends) | Nothing while the icon counts down; “Flash ready” once the number is gone. Can also say the time left when it starts |
+  | A number | Potions (Estus in Dark Souls), ammo, lives | “Estus 3” each time the number changes, with “low” at or below a number you pick |
   | When I ask | Anything | Only with its number key or *Read now* |
+
+  A cooldown or number zone can be as small as the number itself. A number is
+  only said once it's been read the same twice in a row, and a cooldown is only
+  ready once its number has been gone for over a second, so a misread digit
+  isn't said.
 
   A zone can *leave out* words, or *only read* text that matches: a word such as
   your name, or a regular expression (`/whispers:/i`). A zone over a game's chat
@@ -362,7 +369,8 @@ ways in, all under *Accessibility → Screen reader*:
 
 Zones are drawn on top of the game (`Ctrl+Alt+E`, or *Draw zones on screen*) with
 the mouse or entirely by keyboard: `N` for a new box, arrows to move it, `Alt` +
-arrows to resize, `Tab` to the next one, `W` says where it is, `Enter` saves. Or
+arrows to resize, `Tab` to the next one, `W` says where it is, `Enter` saves. The
+editor's *Reads* list sets what each box reads (text, a cooldown, a number…). Or
 start from a template (subtitles, dialogue choices, objective…), or type in where a
 zone goes. `Ctrl+Alt+1`…`9` read zone 1…9 on request. Every key can be changed.
 

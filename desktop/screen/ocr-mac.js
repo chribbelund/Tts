@@ -3,7 +3,7 @@
 // compiled. screen-main.js starts it once and keeps it running: the first
 // recognition loads Vision's model, every one after that is fast.
 //
-// One job per line on stdin:  {"id":1,"png":"<base64>","fast":false,"langs":["en-US"]}
+// One job per line on stdin:  {"id":1,"png":"<base64>","fast":false,"digits":false,"langs":["en-US"]}
 // One answer per line out:    {"id":1,"lines":[{"text":"…","conf":0.9,"box":[x,y,w,h]}]}
 // Boxes are fractions of the image, measured from the top left.
 
@@ -37,7 +37,11 @@ function recognize(job) {
   if (!data || data.isNil()) throw new Error('the picture could not be read');
   const request = $.VNRecognizeTextRequest.alloc.init;
   request.recognitionLevel = job.fast ? 1 : 0;   // 1 = fast, 0 = accurate
-  request.usesLanguageCorrection = !job.fast;
+  // Language correction turns a lone 5 into an S; numbers are read as they are.
+  request.usesLanguageCorrection = !job.fast && !job.digits;
+  // The newest revision guesses which way up the text is, and turns a lone 6
+  // into a 9; revision 2 takes the picture the way up it is.
+  if (job.digits) { try { request.revision = 2; } catch (e) { /* not on this macOS */ } }
   if (Array.isArray(job.langs) && job.langs.length) {
     try { request.recognitionLanguages = $(job.langs); } catch (e) { /* older macOS */ }
   } else {
