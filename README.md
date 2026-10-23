@@ -92,13 +92,24 @@ in the project root, so ⌘R / Ctrl+R picks up your edits. `npm run icons` re-re
 ### Releasing
 
 `.github/workflows/desktop.yml` builds macOS and Windows and attaches the binaries to
-a GitHub release when a tag starting with `v` is pushed. Set the version in
-`desktop/package.json` first — the file names come from it:
+a GitHub release when a tag starting with `v` is pushed. The version comes from the
+tag (`v2.1.0` → 2.1.0), so each new tag must be a higher number than the last:
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+The release also carries `latest.yml`, `latest-mac.yml` and `.blockmap` files. The app
+checks them 30 seconds after it starts and every six hours (`desktop/update-main.js`):
+
+- **Windows installer:** downloads the update in the background and installs it on the
+  next start, or right away from *Restart to update* in the tray menu.
+- **macOS and the Windows portable version:** shows a notice and a *Download version …*
+  tray item that opens the release page. macOS only lets signed apps replace
+  themselves, and the portable version has nowhere to install to.
+
+*Check for updates…* in the tray (and the Help menu on macOS) checks straight away.
 
 The same workflow builds (without publishing) on pull requests that touch the app, and
 can be started by hand from the Actions tab.

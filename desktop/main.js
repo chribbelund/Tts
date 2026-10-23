@@ -9,6 +9,7 @@ const { YouTubeChat } = require('./sources/youtube');
 const { TikTokChat } = require('./sources/tiktok');
 const bot = require('./bot-main');
 const screenReader = require('./screen-main');
+const updates = require('./update-main');
 
 // Chromium won't play audio until the page has been clicked. A reader that is
 // started or resumed by a hotkey has no click to wait for, so allow it up front.
@@ -274,6 +275,8 @@ function renderTray() {
     { label: 'Replay last message', accelerator: registered.replay, registerAccelerator: false, visible: readerState.replay !== false, click: () => sendAction('replay') },
     { label: 'Clear waiting messages', click: () => sendAction('clear') },
     { type: 'separator' },
+    updates.menuItem(),
+    { type: 'separator' },
     { label: win && win.isVisible() ? 'Hide window' : 'Show window', click: toggleWindow },
     { label: 'Quit Chat Reader', click: () => { quitting = true; app.quit(); } },
   ]));
@@ -311,7 +314,10 @@ function buildMenu() {
     { role: 'windowMenu' },
     {
       role: 'help',
-      submenu: [{ label: 'Project page', click: () => shell.openExternal('https://github.com/chribbelund/Tts') }],
+      submenu: [
+        { label: 'Check for updates…', click: () => updates.checkNow() },
+        { label: 'Project page', click: () => shell.openExternal('https://github.com/chribbelund/Tts') },
+      ],
     },
   ]));
 }
@@ -331,6 +337,11 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu();
     buildTray();
     createWindow();
+    updates.setup({
+      getWindow: () => win,
+      onChange: renderTray,
+      beforeInstall: () => { quitting = true; },
+    });
     app.on('activate', showWindow);
   });
 

@@ -11,6 +11,7 @@ directories:
 # build/icon.png is also read at runtime, for the tray and window icons.
 files:
   - main.js
+  - update-main.js
   - preload.js
   - accelerator.js
   - bot-main.js
@@ -29,6 +30,13 @@ files:
 asar: true
 npmRebuild: false
 artifactName: chat-reader-${version}-${os}-${arch}.${ext}
+
+# Where the app looks for updates (update-main.js). The release workflow uploads
+# latest.yml, latest-mac.yml and the .blockmap files next to the downloads.
+publish:
+  provider: github
+  owner: chribbelund
+  repo: Tts
 
 mac:
   icon: build/icon.png

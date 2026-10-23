@@ -50,6 +50,17 @@ jobs:
             node --check "$f" || exit 1
           done
 
+      # The updater compares this number with the running app's, so it has to
+      # match the tag (v2.1.0 → 2.1.0) rather than whatever package.json says.
+      - name: Take the version from the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: desktop
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          version="${version#.}"
+          npm version "$version" --no-git-tag-version --allow-same-version
+
       - name: Copy the page into the app
         working-directory: desktop
         run: npm run sync-web
@@ -65,10 +76,13 @@ jobs:
         with:
           name: ${{ matrix.os }}
           if-no-files-found: error
+          # latest*.yml and the .blockmap files are what the app's updater reads.
           path: |
             desktop/dist/*.dmg
             desktop/dist/*.zip
             desktop/dist/*.exe
+            desktop/dist/*.blockmap
+            desktop/dist/latest*.yml
 
   release:
     name: Publish release
@@ -97,6 +111,8 @@ jobs:
             |---|---|
             | macOS (Intel and Apple silicon) | `.dmg`, or `.zip` |
             | Windows | `*-setup.exe` (installer) or `*-portable.exe` |
+
+            Already installed? The Windows installer version updates itself. On macOS and the portable version, Chat Reader tells you when a new version is out.
 
             The builds are not code-signed, so the first launch needs one extra step:
 

@@ -23,6 +23,7 @@
     "electron-builder": "^26.15.3"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "tiktok-live-connector": "2.5.0"
   }
 }
