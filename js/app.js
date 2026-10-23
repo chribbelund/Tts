@@ -2159,6 +2159,8 @@ function loadKokoro() {
 }
 
 function renderKokoroState(state, info) {
+  // The screen reader (desktop/bot) shows the same state on its own page.
+  if (window.Bot && typeof window.Bot.emit === 'function') window.Bot.emit('neural', { ...info, state });
   const status = $('#kokoroStatus');
   const btn = $('#kokoroLoadBtn');
   const wrap = $('#kokoroProgressWrap');
@@ -3589,15 +3591,24 @@ const host = {
     system: systemEngine.voices().filter((v) => !v.novelty).map((v) => ({ id: v.id, name: v.name, lang: v.lang })),
     neural: KOKORO_VOICES.map((v) => ({ id: v.id, name: `${v.name} (${v.accent === 'UK' ? 'British' : 'American'})` })),
     neuralState: kokoroEngine.state,
+    neuralDevice: kokoroEngine.device,
     reader: { engine: activeEngine() === kokoroEngine ? 'kokoro' : 'system', voiceId: readerVoiceOptions(activeEngine()).voiceId },
   }),
+  // Starts loading the neural voices, for pages outside Voices that use
+  // them. Does nothing while they load or once they're ready.
+  loadNeural() {
+    kokoroEngine.ensureAudio();
+    if (kokoroEngine.state === 'unloaded' || kokoroEngine.state === 'error') loadKokoro();
+  },
   // `engine` is 'system', 'kokoro' or '' for the reader's own voice. Neural
-  // voices fall back to the reader's system voice until they're loaded.
+  // voices fall back to the reader's system voice until they're loaded, and
+  // asking for one starts loading them.
   // Returns a controller with `done` and `stop()`.
   speakVoice(text, { engine = '', voiceId = '', rate = 1, pitch = 1, volume = 100 } = {}) {
     const body = String(text || '').trim();
     const getVol = () => Math.max(0, Math.min(1, Number(volume) / 100));
     let eng = engine === 'kokoro' ? kokoroEngine : engine === 'system' ? systemEngine : activeEngine();
+    if (eng === kokoroEngine && kokoroEngine.state === 'unloaded') loadKokoro();
     if (eng === kokoroEngine && kokoroEngine.state !== 'ready') eng = systemEngine;
     const known = eng === kokoroEngine ? KOKORO_VOICES.some((v) => v.id === voiceId) : systemEngine.voices().some((v) => v.id === voiceId);
     const id = engine && known && (eng === kokoroEngine) === (engine === 'kokoro') ? voiceId : readerVoiceOptions(eng).voiceId;
