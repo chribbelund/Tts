@@ -1,8 +1,8 @@
 'use strict';
 
-// The Screen reader page: turning it on, the zones of each profile (drawn on
-// screen, from a template, or typed in), each zone's voice, the reading
-// cursor, the lens and the hotkeys. The logic is screen.js.
+// The Screen reader page: turning it on, its voices (neural ones load from
+// here), the zones of each profile (drawn on screen, from a template, or typed
+// in), the reading cursor, the lens and the hotkeys. The logic is screen.js.
 
 (() => {
   const h = UI.h;
@@ -18,48 +18,114 @@
   // Voices
   // -------------------------------------------------------------------------
 
+  // The neural voices' loading state, kept from the reader's own events so a
+  // progress bar can move without redrawing the page.
+  const neural = { state: '', progress: 0, loaded: 0, total: 0, error: '' };
+  const neuralNodes = new Set();
+
+  function neuralState() {
+    return neural.state || Bot.host.allVoices().neuralState;
+  }
+
+  function neuralText() {
+    const state = neuralState();
+    if (state === 'ready') return `Neural voices are ready${Bot.host.allVoices().neuralDevice === 'webgpu' ? ' (on the GPU)' : ''}.`;
+    if (state === 'loading') {
+      const mb = (n) => (n / 1e6).toFixed(0);
+      return neural.total >= 1e6 ? `Loading neural voices… ${mb(neural.loaded)} of ${mb(neural.total)} MB` : 'Loading neural voices…';
+    }
+    if (state === 'error') return `Neural voices couldn’t load${neural.error ? `: ${neural.error}` : ''}. A system voice reads instead.`;
+    return 'Neural voices aren’t loaded yet.';
+  }
+
+  Bot.on('neural', (info) => {
+    const before = neuralState();
+    Object.assign(neural, { progress: 0, loaded: 0, total: 0, error: '' }, info);
+    for (const n of [...neuralNodes]) {
+      if (!n.isConnected) { neuralNodes.delete(n); continue; }
+      n.text.textContent = neuralText();
+      n.bar.hidden = neural.state !== 'loading';
+      n.bar.value = neural.progress || 0;
+    }
+    if (neural.state !== before) Bot.emit('neural-state', neural.state);
+  });
+
+  // A line saying how the neural voices are doing, with a progress bar while
+  // they load. `button` adds a way to load them (or try again).
+  function neuralStatus({ button = true } = {}) {
+    const state = neuralState();
+    const text = h('span', { role: 'status' }, neuralText());
+    const bar = h('progress', { max: 1, value: neural.progress || 0, 'aria-hidden': 'true' });
+    bar.hidden = state !== 'loading';
+    neuralNodes.add({ text, bar, get isConnected() { return text.isConnected; } });
+    const action = button && (state === 'unloaded' || state === 'error')
+      ? UI.button(state === 'error' ? 'Try again' : 'Load them now', () => Bot.host.loadNeural(), { cls: 'btn small' })
+      : null;
+    return h('div', { class: `sr-neural${state === 'error' ? ' warn' : ''}` }, h('div', { class: 'sr-neural-line' }, text, action), bar);
+  }
+
   function voiceLabel(voice) {
     const all = Bot.host.allVoices();
     if (!voice.engine) return 'The reader’s voice';
     const list = voice.engine === 'kokoro' ? all.neural : all.system;
     const v = list.find((x) => x.id === voice.voiceId);
     const name = v ? v.name : 'Default';
-    return voice.engine === 'kokoro' && all.neuralState !== 'ready' ? `${name} (neural, not loaded)` : name;
+    if (voice.engine !== 'kokoro') return name;
+    const state = neuralState();
+    return state === 'ready' ? `${name} · neural` : `${name} · neural, ${state === 'loading' ? 'loading' : 'not loaded'}`;
   }
 
-  // Engine, voice, speed, pitch, volume and a button to hear it.
-  function voicePicker(voice, { sample = 'This is how I sound.', onChange = () => {} } = {}) {
+  // One list with every voice, neural ones first. Picking a neural voice
+  // loads them right here; until they're ready a system voice reads.
+  function voicePicker(voice, { sample = 'This is how I sound.', onChange = () => {}, status = true, label = 'Voice' } = {}) {
     const box = h('div', { class: 'sr-voice' });
+    const more = { open: false };
     const draw = () => {
       const all = Bot.host.allVoices();
-      const engine = UI.select(voice, 'engine', [
+      const lang = (navigator.language || 'en').slice(0, 2);
+      const mine = all.system.filter((v) => v.lang.slice(0, 2) === lang);
+      const other = all.system.filter((v) => v.lang.slice(0, 2) !== lang);
+      const holder = { v: voice.engine ? `${voice.engine}:${voice.voiceId || ''}` : '' };
+      const options = [
         ['', 'The reader’s own voice'],
-        ['system', 'A system voice'],
-        ['kokoro', `A neural voice${all.neuralState === 'ready' ? '' : ' (load them under Voices)'}`],
-      ], { label: 'Kind of voice', onChange: () => { voice.voiceId = ''; onChange(); draw(); } });
-      let pick = null;
-      if (voice.engine === 'system') {
-        const lang = (navigator.language || 'en').slice(0, 2);
-        const mine = all.system.filter((v) => v.lang.slice(0, 2) === lang);
-        const other = all.system.filter((v) => v.lang.slice(0, 2) !== lang);
-        pick = UI.select(voice, 'voiceId', [
-          ['', 'Pick a voice…'],
-          ...(mine.length ? [{ group: 'Your language', options: mine.map((v) => [v.id, `${v.name} (${v.lang})`]) }] : []),
-          ...(other.length ? [{ group: 'Other languages', options: other.map((v) => [v.id, `${v.name} (${v.lang})`]) }] : []),
-        ], { label: 'Voice', onChange });
-      } else if (voice.engine === 'kokoro') {
-        pick = UI.select(voice, 'voiceId', [['', 'Pick a voice…'], ...all.neural.map((v) => [v.id, v.name])], { label: 'Voice', onChange });
-      }
-      box.replaceChildren(
-        UI.row(UI.field('Voice', engine), pick ? UI.field('Which one', pick) : null,
-          UI.button('Hear it', () => S.preview(voice, sample))),
+        ...(voice.engine && !voice.voiceId ? [[`${voice.engine}:`, voice.engine === 'kokoro' ? 'A neural voice' : 'A system voice']] : []),
+        { group: 'Neural voices · most natural, English', options: all.neural.map((v) => [`kokoro:${v.id}`, v.name]) },
+        ...(mine.length ? [{ group: 'System voices · your language', options: mine.map((v) => [`system:${v.id}`, `${v.name} (${v.lang})`]) }] : []),
+        ...(other.length ? [{ group: 'System voices · other languages', options: other.map((v) => [`system:${v.id}`, `${v.name} (${v.lang})`]) }] : []),
+      ];
+      const pick = UI.select(holder, 'v', options, {
+        label,
+        onChange: (value) => {
+          const at = value.indexOf(':');
+          voice.engine = at === -1 ? '' : value.slice(0, at);
+          voice.voiceId = at === -1 ? '' : value.slice(at + 1);
+          if (voice.engine === 'kokoro') Bot.host.loadNeural();
+          onChange();
+          draw();
+          box.querySelector('select').focus();
+        },
+      });
+      const details = h('details', { class: 'fx-more' },
+        h('summary', {}, 'Pitch and volume'),
         UI.row(
-          UI.field('Speed', UI.range(voice, 'rate', { min: 0.5, max: 2.5, step: 0.05, suffix: '×', onChange })),
           voice.engine === 'kokoro' ? null : UI.field('Pitch', UI.range(voice, 'pitch', { min: 0.5, max: 1.5, step: 0.05, suffix: '', onChange })),
-          UI.field('Volume', UI.range(voice, 'volume', { min: 0, max: 100, step: 5, onChange }))),
-      );
+          UI.field('Volume', UI.range(voice, 'volume', { min: 0, max: 100, step: 5, onChange }))));
+      details.open = more.open;
+      details.addEventListener('toggle', () => { more.open = details.open; });
+      box.replaceChildren(...[
+        UI.row(
+          UI.field(label, pick),
+          UI.field('Speed', UI.range(voice, 'rate', { min: 0.5, max: 2.5, step: 0.05, suffix: '×', onChange })),
+          UI.button('Hear it', () => S.preview(voice, sample))),
+        status && voice.engine === 'kokoro' && neuralState() !== 'ready' ? neuralStatus() : null,
+        details].filter(Boolean));
     };
     draw();
+    // Redrawn when the neural voices finish loading, unless being used.
+    const off = Bot.on('neural-state', () => {
+      if (!box.isConnected) { off(); return; }
+      if (!box.contains(document.activeElement)) draw();
+    });
     return box;
   }
 
@@ -177,7 +243,7 @@
           UI.field('What it reads', UI.select(z, 'mode', S.MODES, { onChange: rebuild })),
           z.mode === 'menu' ? h('p', { class: 'hint' }, 'Looks for the line that stands out from the others, by colour or brightness, and reads it each time it moves. Works best when the box holds only the menu.') : null,
           z.mode === 'new-lines' ? h('p', { class: 'hint' }, 'What’s in the box when it starts is not read; after that, each line that wasn’t there before is.') : null,
-          h('div', { class: 'field nested' }, h('div', { class: 'row-label' }, 'Voice'), voicePicker(z.voice, { sample: `This is ${z.name || 'this zone'}.` })),
+          voicePicker(z.voice, { sample: `This is ${z.name || 'this zone'}.` }),
           UI.row(
             UI.field('When new text comes', UI.select(z, 'interrupt', S.INTERRUPTS)),
             UI.field('Wait for it to settle (ms)', UI.number(z, 'settle', { min: 0, max: 5000, step: 50 }), 'Text being typed out or fading in is read once it stops changing.')),
@@ -212,60 +278,72 @@
   const liveNodes = { now: null };
 
   function statusSection() {
-    const status = UI.status();
     const cfg = c();
     const zones = S.zones();
     const watching = zones.filter((z) => z.enabled !== false && z.mode !== 'manual').length;
     let line;
     if (!cfg.enabled) line = 'Off. The hotkeys still read the screen when you press them.';
-    else if (!watching) line = 'On, but no zone is set to read by itself. Add one under Zones.';
+    else if (!watching) line = 'On, but no zone reads by itself yet. Add one under Zones.';
     else if (S.status === 'watching') line = `Watching ${watching} zone${watching === 1 ? '' : 's'} in “${S.profile().name}”.`;
     else if (S.status === 'starting') line = 'Starting…';
     else line = 'Not watching.';
     const nowLine = h('p', { class: 'hint sr-now' });
     liveNodes.now = nowLine;
     drawLive();
-
-    const ocr = S.ocr;
-    const testOut = h('p', { class: 'hint', role: 'status' });
-    return UI.section('Status',
-      UI.check(cfg, 'enabled', 'Read the zones out loud when their text changes', { onChange: () => { save(); S.apply(); } }),
+    return UI.section('Screen reader',
+      UI.check(cfg, 'enabled', 'On: read the zones out loud when their text changes', { onChange: () => { save(); S.apply(); } }),
       h('p', { class: S.problem ? 'warn' : 'hint' }, S.problem || line),
       nowLine,
       IS_MAC && S.access !== 'granted' ? h('div', { class: 'warn' },
         h('p', {}, 'macOS has to allow Chat Reader to see the screen. Press the button, turn Chat Reader on under Screen Recording, then quit and open the app again.'),
         UI.button('Allow screen recording…', async () => { await S.askAccess(); UI.rerender(); }, { cls: 'btn small primary' })) : null,
       UI.row(
-        h('span', { class: 'hint' }, `Text recognition: ${ocr.engine || (IS_MAC ? 'Apple Vision' : 'Windows OCR')}${ocr.error ? ` — ${ocr.error}` : ''}`),
-        UI.button('Test it', (e) => UI.busy(e.currentTarget, async () => {
-          UI.say(testOut, 'Reading a test picture… The first time can take a few seconds.');
-          const r = await S.selfTest();
-          UI.say(testOut, r.text ? `Read “${r.text}” in ${r.ms} ms.` : 'It ran, but found no text.', !r.text);
-        }, testOut)),
         UI.button('Read the whole screen', () => S.navigate('readAll')),
-        UI.button('Stop', () => S.stop())),
-      testOut,
-      status);
+        UI.button('Stop', () => S.stop())));
   }
 
-  // The first sub-page: the status, the profile in use, and what the other
-  // sub-pages are for.
+  // Neural voices for the screen reader, without going to Voices.
+  function voicesSection() {
+    const cfg = c();
+    const zones = S.zones();
+    const state = neuralState();
+    const allNeural = S.allNeural();
+    return UI.section('Voices',
+      UI.lead('Neural voices sound the most natural. They run on this computer, in English; the first time they download once, around 90 MB. Until they’re ready, a system voice reads.'),
+      S.usesNeural() || state !== 'unloaded' ? neuralStatus() : null,
+      allNeural ? null : UI.row(
+        UI.button(zones.length ? 'Use neural voices' : 'Use a neural voice', () => {
+          S.useNeuralVoices();
+          save();
+          S.apply();
+          UI.rerender();
+        }, { cls: 'btn small primary' }),
+        h('span', { class: 'hint' }, zones.length
+          ? 'Gives each zone and the reading cursor a neural voice of its own, so you can tell them apart.'
+          : 'For the reading cursor, and new zones get one too.')),
+      voicePicker(cfg.nav.voice, { sample: 'Next line.', status: false, label: 'Reading cursor voice', onChange: () => { save(); S.apply(); UI.rerender(); } }),
+      zones.length ? h('p', { class: 'hint' }, 'Each zone’s own voice is under ', UI.button('Zones', () => Bot.shell.show('screen/zones'), { cls: 'link' }), ', with Edit.') : null);
+  }
+
+  // The first sub-page: on or off, the voices, the profile in use, and what
+  // the other sub-pages are for.
   function overviewSections() {
     const zones = S.zones();
     const watching = zones.filter((z) => z.enabled !== false && z.mode !== 'manual').length;
     const go = (sub, label) => UI.button(label, () => Bot.shell.show(`screen/${sub}`), { cls: 'link' });
     return [
       statusSection(),
+      voicesSection(),
       UI.section('Profile',
         profilePicker(),
         h('p', { class: 'hint' }, `${zones.length ? `${zones.length} zone${zones.length === 1 ? '' : 's'}, ${watching} reading by themselves. ` : 'No zones yet. '}`,
           go('zones', zones.length ? 'Change the zones' : 'Add a zone'))),
-      UI.section('Also here',
+      UI.section('More',
         h('ul', { class: 'sr-overview' },
           h('li', {}, go('cursor', 'Reading cursor'), ': read the screen line by line with hotkeys.'),
           h('li', {}, go('lens', 'Lens'), `: a magnifier that follows what’s read. ${c().lens.enabled ? 'On.' : 'Off.'}`),
           h('li', {}, go('keys', 'Hotkeys'), ': the keys for all of it, working while a game is focused.'),
-          h('li', {}, go('tuning', 'Speech & timing'), ': pausing chat, how often the screen is looked at, and tips for games.'))),
+          h('li', {}, go('tuning', 'Speech & timing'), ': pausing chat, text recognition and tips for games.'))),
     ];
   }
 
@@ -478,7 +556,7 @@
         h('li', {}, h('kbd', {}, k('next')), ' and ', h('kbd', {}, k('prev')), ' read the next and previous line, top to bottom.'),
         h('li', {}, h('kbd', {}, k('left')), ' and ', h('kbd', {}, k('right')), ' jump to the nearest text on the left or right, for menus laid out side by side.'),
         h('li', {}, h('kbd', {}, k('readAll')), ' reads everything on the screen, ', h('kbd', {}, k('stop')), ' stops.')),
-      h('div', { class: 'field nested' }, h('div', { class: 'row-label' }, 'Cursor voice'), voicePicker(cfg.nav.voice, { sample: 'Next line.', onChange: save })),
+      voicePicker(cfg.nav.voice, { sample: 'Next line.', label: 'Cursor voice', onChange: save }),
       UI.check(cfg.nav, 'wrap', 'Go round to the top after the last line', { onChange: save }),
       UI.check(cfg, 'highlight', 'Draw a box around what’s being read', { onChange: () => { save(); S.apply(); } }));
   }
@@ -531,6 +609,8 @@
 
   function tuningSection() {
     const cfg = c();
+    const ocr = S.ocr;
+    const testOut = h('p', { class: 'hint', role: 'status' });
     return UI.section('Speech and timing',
       UI.check(cfg, 'pauseChat', 'Pause chat while screen text is read', { onChange: save }),
       h('p', { class: 'hint' }, 'Chat carries on from where it stopped. Two system voices can’t talk at once, so chat in a system voice always waits.'),
@@ -538,6 +618,14 @@
         UI.field('Notice changes', UI.select(cfg, 'sensitivity', [['low', 'Only big changes'], ['normal', 'Normal'], ['high', 'Even small changes']], { onChange: save })),
         UI.field('Look every (ms)', UI.number(cfg, 'interval', { min: 100, max: 2000, step: 50, onChange: () => { save(); S.apply(); } }))),
       UI.check(cfg, 'fastOcr', 'Faster but rougher text recognition', { onChange: save }),
+      UI.row(
+        h('span', { class: 'hint' }, `Text recognition: ${ocr.engine || (IS_MAC ? 'Apple Vision' : 'Windows OCR')}${ocr.error ? ` — ${ocr.error}` : ''}`),
+        UI.button('Test it', (e) => UI.busy(e.currentTarget, async () => {
+          UI.say(testOut, 'Reading a test picture… The first time can take a few seconds.');
+          const r = await S.selfTest();
+          UI.say(testOut, r.text ? `Read “${r.text}” in ${r.ms} ms.` : 'It ran, but found no text.', !r.text);
+        }, testOut))),
+      testOut,
       h('details', { class: 'fx-more' },
         h('summary', {}, 'Tips for games'),
         h('ul', { class: 'sr-keys-list' },
@@ -558,7 +646,7 @@
       show('lens') && lensSection(),
       show('keys') && keysSection(),
       show('tuning') && tuningSection());
-  }, { listens: ['screen'] });
+  }, { listens: ['screen', 'neural-state'] });
 
   // The engine's status shows on the page; look it up when the page opens.
   Bot.on('page', (id) => { if (id === 'screen') S.checkOcr(false).catch(() => {}); });

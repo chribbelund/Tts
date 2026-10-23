@@ -206,15 +206,40 @@
 
   // A voice for a new zone that the other zones don't have yet, so each one
   // can be told apart by ear. The first zone gets the reader's own voice.
+  // Neural when the reader or another zone already uses neural voices.
   S.voiceForNewZone = (zones = S.zones()) => {
-    if (!zones.length) return { ...ZONE_DEFAULTS.voice };
     const all = host.allVoices();
-    const neural = all.neuralState === 'ready' && all.reader.engine === 'kokoro';
+    const navNeural = cfg().nav.voice.engine === 'kokoro';
+    if (!zones.length && !navNeural) return { ...ZONE_DEFAULTS.voice };
+    const neural = all.neuralState !== 'error' && (navNeural || all.reader.engine === 'kokoro' || zones.some((z) => z.voice.engine === 'kokoro'));
     const lang = (all.system.find((v) => v.id === all.reader.voiceId) || {}).lang || navigator.language || 'en';
     const list = neural ? all.neural : all.system.filter((v) => v.lang.slice(0, 2) === lang.slice(0, 2));
-    const used = new Set([all.reader.voiceId, ...zones.map((z) => z.voice.voiceId)]);
+    const used = new Set([all.reader.voiceId, cfg().nav.voice.voiceId, ...zones.map((z) => z.voice.voiceId)]);
     const pick = list.find((v) => !used.has(v.id)) || list[zones.length % Math.max(1, list.length)];
     return pick ? { ...ZONE_DEFAULTS.voice, engine: neural ? 'kokoro' : 'system', voiceId: pick.id } : { ...ZONE_DEFAULTS.voice };
+  };
+
+  // Every voice the screen reader uses: the zones' and the cursor's.
+  const voicesInUse = () => [...S.zones().map((z) => z.voice), cfg().nav.voice];
+  S.usesNeural = () => voicesInUse().some((v) => v.engine === 'kokoro');
+  S.allNeural = () => voicesInUse().every((v) => v.engine === 'kokoro');
+
+  // Gives each zone and the cursor a neural voice of its own, keeping speed
+  // and volume, and starts loading them.
+  S.useNeuralVoices = () => {
+    const list = host.allVoices().neural;
+    if (!list.length) return;
+    const voices = voicesInUse();
+    const used = new Set(voices.filter((v) => v.engine === 'kokoro').map((v) => v.voiceId));
+    let i = 0;
+    for (const v of voices) {
+      if (v.engine === 'kokoro' && v.voiceId) continue;
+      const pick = list.find((x) => !used.has(x.id)) || list[i++ % list.length];
+      used.add(pick.id);
+      v.engine = 'kokoro';
+      v.voiceId = pick.id;
+    }
+    host.loadNeural();
   };
 
   S.newZone = (template = null) => {
@@ -1143,6 +1168,8 @@
     pushLens();
     if (running()) { if (!loopTimer) schedule(50); } else schedule();
     if (keys) host.syncHotkeys();
+    // Neural voices load as soon as the screen reader needs them.
+    if (cfg().enabled && S.usesNeural() && host.allVoices().neuralState === 'unloaded') host.loadNeural();
     syncAppWatch();
     changed();
   };
