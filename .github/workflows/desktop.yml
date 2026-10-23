@@ -103,6 +103,11 @@ jobs:
         with:
           files: artifacts/*
           draft: false
+          # A tag with a dash (v2.1.0-beta.1) is published as a Pre-release. For
+          # other tags this is left empty, so a release already marked
+          # Pre-release on GitHub keeps that label. Only apps with "Get beta
+          # versions" on take pre-releases.
+          prerelease: ${{ contains(github.ref_name, '-') && 'true' || '' }}
           generate_release_notes: true
           body: |
             Desktop builds of Chat Reader: reads Twitch, YouTube and TikTok chat out loud, with hotkeys that keep working while a game is focused.

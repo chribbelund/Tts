@@ -110,6 +110,19 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
     },
   },
 
+  // Updates from GitHub releases (update-main.js). The info is
+  // { status, version, percent, beta, enabled, current }.
+  updates: {
+    get: () => ipcRenderer.invoke('updates:get'),
+    setBeta: (on) => ipcRenderer.invoke('updates:set-beta', !!on),
+    check: () => ipcRenderer.send('updates:check'),
+    onChange: (handler) => {
+      const listener = (_event, info) => handler(info);
+      ipcRenderer.on('updates:changed', listener);
+      return () => ipcRenderer.off('updates:changed', listener);
+    },
+  },
+
   toggleWindow: () => ipcRenderer.send('window:toggle'),
   hideWindow: () => ipcRenderer.send('window:hide'),
   openExternal: (url) => ipcRenderer.send('shell:open-external', url),

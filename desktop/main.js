@@ -339,7 +339,10 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     updates.setup({
       getWindow: () => win,
-      onChange: renderTray,
+      onChange: () => {
+        renderTray();
+        if (win && !win.isDestroyed()) win.webContents.send('updates:changed', updates.getInfo());
+      },
       beforeInstall: () => { quitting = true; },
     });
     app.on('activate', showWindow);
@@ -452,4 +455,7 @@ ipcMain.handle('source:disconnect', (_event, { id } = {}) => {
 
 ipcMain.on('window:toggle', toggleWindow);
 ipcMain.on('window:hide', hideToTray);
+ipcMain.handle('updates:get', () => updates.getInfo());
+ipcMain.handle('updates:set-beta', (_event, on) => { updates.setBeta(on); return updates.getInfo(); });
+ipcMain.on('updates:check', () => updates.checkNow());
 ipcMain.on('shell:open-external', (_event, url) => { if (/^https?:\/\//.test(String(url))) shell.openExternal(String(url)); });

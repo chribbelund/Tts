@@ -111,6 +111,21 @@ checks them 30 seconds after it starts and every six hours (`desktop/update-main
 
 *Check for updates…* in the tray (and the Help menu on macOS) checks straight away.
 
+**Betas:** releases marked *Pre-release* on GitHub. Only apps with *Get beta versions*
+on (in the Keys section) pick those up; everyone else gets the release marked *Latest*.
+The easy way is a tag with a dash, which the workflow publishes as a pre-release:
+
+```bash
+git tag v2.1.0-beta.1
+git push origin v2.1.0-beta.1
+```
+
+`2.1.0-beta.1` counts as older than `2.1.0`, so beta testers move on to the finished
+version when it's out. A plain tag can be a beta too, but then mark it *Pre-release*
+yourself before the build finishes (create the release on GitHub with the new tag),
+or apps without betas may take it in the meantime. Turning betas off never goes back
+a version: a beta tester stays put until a *Latest* release is newer than theirs.
+
 The same workflow builds (without publishing) on pull requests that touch the app, and
 can be started by hand from the Actions tab.
 

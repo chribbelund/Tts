@@ -2595,6 +2595,37 @@ function startDesktop() {
   });
 
   syncGlobalHotkeys();
+  startUpdates();
+}
+
+// Updates from GitHub releases. The choice of beta versions is kept by the app
+// (desktop/update-main.js), not with the page's settings.
+function showUpdates(info) {
+  if (!info) return;
+  $('#betaUpdates').checked = !!info.beta;
+  const text = !info.enabled ? 'Updates are only checked in the installed app.'
+    : info.status === 'checking' ? 'Checking for updates…'
+    : info.status === 'downloading' ? `Downloading version ${info.version}… ${info.percent}%`
+    : info.status === 'ready' ? `Version ${info.version} installs the next time Chat Reader starts.`
+    : info.status === 'available' ? `Version ${info.version} is out.`
+    : info.status === 'error' ? 'Couldn’t check for updates. It tries again later.'
+    : '';
+  $('#updateStatus').textContent = text;
+  const btn = $('#checkUpdatesBtn');
+  btn.disabled = info.status === 'checking' || info.status === 'downloading';
+  btn.textContent = info.status === 'ready' ? 'Restart to update'
+    : info.status === 'available' ? 'Open download page'
+    : 'Check for updates';
+}
+
+function startUpdates() {
+  if (!desktop.updates) return;
+  desktop.updates.get().then(showUpdates);
+  desktop.updates.onChange(showUpdates);
+  $('#betaUpdates').addEventListener('change', (e) => {
+    desktop.updates.setBeta(e.target.checked).then(showUpdates);
+  });
+  $('#checkUpdatesBtn').addEventListener('click', () => desktop.updates.check());
 }
 
 // ---------------------------------------------------------------------------
