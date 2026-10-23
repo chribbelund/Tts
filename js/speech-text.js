@@ -124,8 +124,8 @@ function composeSpeech(entry, prev, settings) {
 
   if (entry.kind === 'event') {
     let systemText = entry.systemText || '';
-    const nickname = nicknames[normalizeLogin(entry.login)];
-    if (nickname && entry.displayName) systemText = systemText.split(entry.displayName).join(nickname);
+    // Say the name the usual way: a nickname if set, and "Nolle_Bolle" as "Nolle Bolle".
+    if (entry.displayName) systemText = systemText.split(entry.displayName).join(name);
     const system = cleanForSpeech(systemText, { readEmojis: false, nicknames });
     if (!system || !body) return system || body;
     return /[.!?…]$/.test(system) ? `${system} ${body}` : `${system}. ${body}`;

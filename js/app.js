@@ -975,7 +975,17 @@ function entryFromUserNotice(msg) {
   // In a collab, a notice from a partner's chat is wrapped as "sharedchatnotice".
   const kind = tags['msg-id'] === 'sharedchatnotice' ? tags['source-msg-id'] : tags['msg-id'];
   if (kind === 'announcement') return { ...base, kind: 'announcement' };
-  return { ...base, kind: 'event', systemText: tags['system-msg'] || '' };
+  return { ...base, kind: 'event', systemText: withNoticeName(tags['system-msg'] || '', base.displayName, login) };
+}
+
+// Some notices leave the name out, e.g. a mod anniversary's text is just
+// "has been a moderator for 6 months!", so put the name back in front.
+function withNoticeName(systemText, displayName, login) {
+  const text = systemText.trim();
+  if (!text || !displayName || login === 'ananonymousgifter') return text;
+  const lower = text.toLowerCase();
+  if (lower.includes(displayName.toLowerCase()) || (login && lower.includes(login))) return text;
+  return /^\p{Ll}/u.test(text) ? `${displayName} ${text}` : `${displayName}: ${text}`;
 }
 
 // ---------------------------------------------------------------------------
