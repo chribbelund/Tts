@@ -11,7 +11,7 @@
   const save = () => Bot.save();
   const IS_MAC = window.chatReaderDesktop.platform === 'darwin';
 
-  const MODE_SHORT = { changes: 'When it changes', 'new-lines': 'New lines', menu: 'Highlighted line', manual: 'When I ask' };
+  const MODE_SHORT = { changes: 'When it changes', 'new-lines': 'New lines', menu: 'Highlighted line', cooldown: 'Cooldown', count: 'A number', manual: 'When I ask' };
   const pct = (v) => Math.round(v * 1000) / 10;
 
   // -------------------------------------------------------------------------
@@ -243,13 +243,26 @@
           UI.field('What it reads', UI.select(z, 'mode', S.MODES, { onChange: rebuild })),
           z.mode === 'menu' ? h('p', { class: 'hint' }, 'Looks for the line that stands out from the others, by colour or brightness, and reads it each time it moves. Works best when the box holds only the menu.') : null,
           z.mode === 'new-lines' ? h('p', { class: 'hint' }, 'What’s in the box when it starts is not read; after that, each line that wasn’t there before is.') : null,
-          voicePicker(z.voice, { sample: `This is ${z.name || 'this zone'}.` }),
+          z.mode === 'cooldown' ? h('div', { class: 'field nested' },
+            h('p', { class: 'hint' }, 'For an ability or item whose icon shows a number counting down while it can’t be used, as in League of Legends. Draw the box tight around where the number appears. When the number goes away, “', h('strong', {}, z.readyText || `${z.prefix || z.name} ready`), '” is said.'),
+            UI.row(
+              UI.field('Say when ready', UI.text(z, 'readyText', { placeholder: `${z.prefix || z.name || 'Flash'} ready`, maxlength: 80 }), 'Leave empty for its name and “ready”.'),
+              UI.check(z, 'sayStart', 'Also say the time left when it starts')),
+            UI.field('Count down out loud from (seconds)', UI.number(z, 'countFrom', { min: 0, max: 60 }),
+              z.countFrom > 0
+                ? `At ${z.countFrom} seconds left: “${z.prefix || z.name || 'Flash'} ${z.countFrom}”, then each second down to 1, then “${z.readyText || `${z.prefix || z.name || 'Flash'} ready`}”.`
+                : '0 is off. At 5: its name and 5, then 4, 3, 2, 1 and “ready”, one each second.')) : null,
+          z.mode === 'count' ? h('div', { class: 'field nested' },
+            h('p', { class: 'hint' }, 'For a number on the screen, like healing flasks in Dark Souls, ammo or lives. Draw the box tight around the number. Each time it changes, its name and the new number are said: “', h('strong', {}, `${z.prefix || z.name} 3`), '”. The number already there when it starts isn’t said.'),
+            UI.field('Say “low” at or below', UI.number(z, 'low', { min: 0, max: 9999 }), '0 is off. At 1, “Estus 1, low” and “Estus 0, low”.')) : null,
+          S.isNumberZone(z) ? h('p', { class: 'hint' }, 'A number is only said once it’s been read the same twice in a row, so a misread digit isn’t. Name the zone what you want to hear, like Flash or Estus, or use Say first below.') : null,
+          voicePicker(z.voice, { sample: S.isNumberZone(z) ? `${z.prefix || z.name || 'Flash'} ${z.mode === 'cooldown' ? 'ready' : '3'}` : `This is ${z.name || 'this zone'}.` }),
           UI.row(
             UI.field('When new text comes', UI.select(z, 'interrupt', S.INTERRUPTS)),
             UI.field('Wait for it to settle (ms)', UI.number(z, 'settle', { min: 0, max: 5000, step: 50 }), 'Text being typed out or fading in is read once it stops changing.')),
           UI.field('Say first', UI.text(z, 'prefix', { placeholder: 'e.g. Objective', maxlength: 40 }), 'Said before the text, to tell zones in the same voice apart. Leave empty to say only the text.'),
           UI.field('Leave out', UI.text(z, 'ignore', { multiline: true, rows: 3, placeholder: 'One per line, e.g.\n[E]\n/\\d+ m$/' }), 'Words or phrases never read from this box, one per line. /…/ is a regular expression.'),
-          onlyField(z, rebuild),
+          S.isNumberZone(z) ? null : onlyField(z, rebuild),
           h('div', { class: 'field nested' },
             h('div', { class: 'row-label' }, 'Where on the screen (% of its width and height)'),
             UI.row(pos('x', 'From the left'), pos('y', 'From the top'), pos('w', 'Width'), pos('h', 'Height')),
@@ -617,9 +630,13 @@
       UI.row(
         UI.field('Notice changes', UI.select(cfg, 'sensitivity', [['low', 'Only big changes'], ['normal', 'Normal'], ['high', 'Even small changes']], { onChange: save })),
         UI.field('Look every (ms)', UI.number(cfg, 'interval', { min: 100, max: 2000, step: 50, onChange: () => { save(); S.apply(); } }))),
-      UI.check(cfg, 'fastOcr', 'Faster but rougher text recognition', { onChange: save }),
+      UI.field('Text recognition', UI.select(cfg, 'ocrEngine', S.OCR_ENGINES, { onChange: () => { save(); S.checkOcr(true).then(UI.rerender); } }),
+        IS_MAC
+          ? 'Automatic uses Apple Vision. PaddleOCR is built into Chat Reader and reads English, Swedish, German, French, Spanish and about 30 more languages.'
+          : 'Automatic uses PaddleOCR, built into Chat Reader, for zones when your language uses the Latin alphabet (English, Swedish, German, French, Spanish and about 30 more): it reads game text and small numbers far more reliably than Windows OCR. Reading the whole screen stays with Windows OCR, which is much quicker at it. Pick PaddleOCR to use it for that too.'),
+      S.usesPaddle() ? null : UI.check(cfg, 'fastOcr', 'Faster but rougher text recognition', { onChange: save }),
       UI.row(
-        h('span', { class: 'hint' }, `Text recognition: ${ocr.engine || (IS_MAC ? 'Apple Vision' : 'Windows OCR')}${ocr.error ? ` — ${ocr.error}` : ''}`),
+        h('span', { class: 'hint' }, `Text recognition in use: ${ocr.engine || (IS_MAC ? 'Apple Vision' : 'Windows OCR')}${ocr.error ? ` — ${ocr.error}` : ''}`),
         UI.button('Test it', (e) => UI.busy(e.currentTarget, async () => {
           UI.say(testOut, 'Reading a test picture… The first time can take a few seconds.');
           const r = await S.selfTest();
@@ -632,6 +649,7 @@
           h('li', {}, 'Use borderless or windowed full screen. True (exclusive) full screen can hide the game from screen capture and puts it above the lens.'),
           h('li', {}, 'Big, plain subtitles with a dark background behind them are read best. Many games have both settings.'),
           h('li', {}, 'Keep a box tight around its text: less moving picture behind it means fewer misreads.'),
+          h('li', {}, 'For a cooldown or a potion count, the box can be as small as the number itself. Make the game’s HUD bigger if it has the setting: bigger numbers are read more reliably.'),
           h('li', {}, 'The lens, the outlines and the zone editor are hidden from screen capture, so they’re never read or streamed.'))));
   }
 

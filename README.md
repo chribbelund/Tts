@@ -334,7 +334,14 @@ ways in, all under *Accessibility → Screen reader*:
   | When it changes | Subtitles, dialogue, objectives | The whole text, once, when it's new. Text typed out a letter at a time is read once it settles, and only the new part |
   | New lines | Logs, notifications, game chat | Only lines that weren't there before |
   | Highlighted line | Menus, dialogue choices | The line that stands out by colour or brightness, each time it moves |
+  | Cooldown | Ability icons (League of Legends) | Nothing while the icon counts down; “Flash ready” once the number is gone. Can also say the time left when it starts, and count the last seconds out loud (“Flash 5”, “4”, “3”…) |
+  | A number | Potions (Estus in Dark Souls), ammo, lives | “Estus 3” each time the number changes, with “low” at or below a number you pick |
   | When I ask | Anything | Only with its number key or *Read now* |
+
+  A cooldown or number zone can be as small as the number itself. A number is
+  only said once it's been read the same twice in a row, and a cooldown is only
+  ready once its number has been gone for over a second (half a second after a
+  1), so a misread digit isn't said.
 
   A zone can *leave out* words, or *only read* text that matches: a word such as
   your name, or a regular expression (`/whispers:/i`). A zone over a game's chat
@@ -362,12 +369,18 @@ ways in, all under *Accessibility → Screen reader*:
 
 Zones are drawn on top of the game (`Ctrl+Alt+E`, or *Draw zones on screen*) with
 the mouse or entirely by keyboard: `N` for a new box, arrows to move it, `Alt` +
-arrows to resize, `Tab` to the next one, `W` says where it is, `Enter` saves. Or
+arrows to resize, `Tab` to the next one, `W` says where it is, `Enter` saves. The
+editor's *Reads* list sets what each box reads (text, a cooldown, a number…). Or
 start from a template (subtitles, dialogue choices, objective…), or type in where a
 zone goes. `Ctrl+Alt+1`…`9` read zone 1…9 on request. Every key can be changed.
 
-- Text is recognised by the system itself: Apple Vision on macOS, Windows OCR on
-  Windows 10 and 11. Nothing is sent anywhere.
+- Text is recognised on your computer; nothing is sent anywhere. On Windows,
+  zones are read by PaddleOCR (PP-OCRv5), built into the app: on game text it
+  gets about 2% of characters wrong where Windows OCR gets 11%, and reads small
+  numbers far more reliably. It reads languages written in the Latin alphabet
+  (English, Swedish, German, French, Spanish and about 30 more); for others,
+  and for reading the whole screen, Windows OCR is used. On macOS Apple Vision
+  is used, with PaddleOCR as an option under *Speech and timing*.
 - Chat pauses while screen text is read and carries on where it stopped.
 - The lens, the outlines and the editor are hidden from screen capture, so they're
   never read, magnified or streamed.
@@ -630,6 +643,6 @@ For system voices, Microsoft Edge offers the most natural free options, the "…
 - `desktop/import-main.js`: reading Firebot and Mix It Up data (JSON, NeDB, SQLite, zip backups) for the importer
 - `desktop/bot/`: the bot itself, loaded into the page by the desktop app only — Twitch login and API (`twitch.js`), EventSub (`eventsub.js`), `$variables` (`variables.js`), effects (`effects.js`), commands, events and timers (`triggers.js`), viewers, points, games and moderation (`community.js`), OBS (`obs.js`), the multistream relay (`relay.js`), importing from other bots (`importers.js`), the controls and tabs (`ui.js`, `ui-tabs.js`, `ui-multistream.js`), the Dashboard's side column (`dashboard.js`), where the reader and the bot meet (`integrations.js`) and the window's sections (`shell.js`)
 - `desktop/overlay/`: the OBS overlay page
-- `desktop/screen-main.js`, `desktop/screen/`: the screen reader's main-process side — screen capture without a picker, the text recognition helpers (`ocr-mac.js` for Apple Vision, `ocr-win.ps1` for Windows OCR), the helpers that notice which program is in front (`apps-mac.js`, `apps-win.ps1`), and the windows over the game: the zone editor and outlines (`overlay.*`) and the lens (`lens.*`); `desktop/bot/screen.js` and `ui-screen.js` are its page side
+- `desktop/screen-main.js`, `desktop/screen/`: the screen reader's main-process side — screen capture without a picker, the text recognition helpers (`ocr-mac.js` for Apple Vision, `ocr-win.ps1` for Windows OCR; `paddle-ocr.js` and `ocr-worker.js` run PaddleOCR in a worker, with models that `scripts/fetch-ocr.js` downloads into `screen/models/`), the helpers that notice which program is in front (`apps-mac.js`, `apps-win.ps1`), and the windows over the game: the zone editor and outlines (`overlay.*`) and the lens (`lens.*`); `desktop/bot/screen.js` and `ui-screen.js` are its page side
 - `docs/bot-plan.md`: how the bot is put together, and why
 - `.github/workflows/desktop.yml`: builds the desktop binaries and publishes them on a `v*` tag

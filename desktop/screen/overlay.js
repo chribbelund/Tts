@@ -13,6 +13,7 @@
   const api = window.screenOverlay || {
     role: demo ? 'editor' : 'markers',
     onState: () => {},
+    onFrame: () => {},
     done: (zones) => { console.log('done', zones); },
     say: (text) => { console.log('say:', text); },
   };
@@ -21,9 +22,26 @@
   const stage = $('stage');
   const live = $('live');
   const COLORS = ['#4fc3ff', '#ff8a3d', '#7dff6b', '#ff5fd2', '#ffe14d', '#b18cff', '#3dffd8', '#ff6b6b'];
-  const MIN = 0.01;          // the smallest a zone can be, as a fraction of the screen
+  const MIN_PX = 6;          // the smallest a zone can be, in pixels: a cooldown number is tiny
+  const CLICK_PX = 5;        // a press that moves less than this is a click, not a drag
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-  const pct = (v) => `${Math.round(v * 100)}%`;
+  // Small boxes get a decimal, or a 12-pixel box would be "1% wide".
+  const pct = (v) => `${v < 0.1 ? Math.round(v * 1000) / 10 : Math.round(v * 100)}%`;
+
+  // The screen, inside this window. Zones are fractions of the screen, and
+  // the window may not cover all of it (or may start above it), so the stage
+  // is sized and placed as the screen itself.
+  function applyFrame(f) {
+    if (!f || !(f.width > 0) || !(f.height > 0)) return;
+    Object.assign(stage.style, { inset: 'auto', left: `${f.x}px`, top: `${f.y}px`, width: `${f.width}px`, height: `${f.height}px` });
+  }
+  api.onFrame(applyFrame);
+  const stageSize = () => {
+    const r = stage.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? r : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+  };
+  const minW = () => MIN_PX / stageSize().width;
+  const minH = () => MIN_PX / stageSize().height;
 
   let state = { zones: [], focus: null, showZones: false };
 
@@ -41,6 +59,14 @@
     node.style.height = `${r.h * 100}%`;
   }
 
+  // A box too small for a thick border inside it (it would hide the number
+  // it's around) gets a thin line outside instead.
+  const TINY_PX = 44;
+  const isTiny = (r) => {
+    const s = stageSize();
+    return r.w * s.width < TINY_PX || r.h * s.height < TINY_PX;
+  };
+
   // -------------------------------------------------------------------------
   // Markers
   // -------------------------------------------------------------------------
@@ -56,7 +82,8 @@
         const node = el('div', `zone${z.on === false ? ' off' : ''}`);
         node.style.setProperty('--c', z.color || COLORS[i % COLORS.length]);
         place(node, z.rect);
-        if (z.rect.y < 0.05) node.classList.add('label-inside');
+        if (isTiny(z.rect)) node.classList.add('tiny');
+        else if (z.rect.y < 0.05) node.classList.add('label-inside');
         node.append(el('span', 'zone-label', `${i + 1} ${z.name || ''}`.trim()));
         stage.append(node);
       }
@@ -99,8 +126,8 @@
   }
 
   function fit(r) {
-    const w = clamp(r.w, MIN, 1);
-    const h = clamp(r.h, MIN, 1);
+    const w = clamp(r.w, minW(), 1);
+    const h = clamp(r.h, minH(), 1);
     return { x: clamp(r.x, 0, 1 - w), y: clamp(r.y, 0, 1 - h), w, h };
   }
 
@@ -126,7 +153,9 @@
       node.style.setProperty('--c', z.color || COLORS[i % COLORS.length]);
       place(node, z.rect);
       node.classList.toggle('selected', z.id === selected);
-      node.classList.toggle('label-inside', z.rect.y < 0.05);
+      const tiny = isTiny(z.rect);
+      node.classList.toggle('tiny', tiny);
+      node.classList.toggle('label-inside', !tiny && z.rect.y < 0.05);
       node.querySelector('.zone-label').textContent = `${i + 1} ${z.name || ''}`.trim();
       const pos = { nw: [0, 0], n: [50, 0], ne: [100, 0], e: [100, 50], se: [100, 100], s: [50, 100], sw: [0, 100], w: [0, 50] };
       for (const handle of node.querySelectorAll('.handle')) {
@@ -140,6 +169,9 @@
     $('tbName').value = z ? z.name || '' : '';
     $('tbName').disabled = !z;
     $('tbDelete').disabled = !z;
+    const mode = $('tbMode');
+    mode.disabled = !z;
+    mode.value = z ? z.mode || 'changes' : 'changes';
     $('tbPos').textContent = z ? `${pct(z.rect.x)}, ${pct(z.rect.y)} · ${pct(z.rect.w)} × ${pct(z.rect.h)}` : 'No box selected';
   }
 
@@ -152,7 +184,7 @@
 
   function addZone(rect, { announce = true } = {}) {
     const n = zones.length + 1;
-    const z = { id: uid(), name: `Zone ${n}`, rect: fit(rect), color: COLORS[(n - 1) % COLORS.length], isNew: true };
+    const z = { id: uid(), name: `Zone ${n}`, rect: fit(rect), color: COLORS[(n - 1) % COLORS.length], mode: 'changes', isNew: true };
     zones.push(z);
     select(z, { announce: false });
     if (announce) say(`New box, ${z.name}. Move it with the arrow keys, resize it with Alt and the arrow keys.`);
@@ -181,7 +213,8 @@
   }
 
   function pointer(e) {
-    return { x: clamp(e.clientX / window.innerWidth, 0, 1), y: clamp(e.clientY / window.innerHeight, 0, 1) };
+    const r = stageSize();
+    return { x: clamp((e.clientX - r.left) / r.width, 0, 1), y: clamp((e.clientY - r.top) / r.height, 0, 1) };
   }
 
   function onPointerDown(e) {
@@ -193,10 +226,10 @@
       const z = zones.find((x) => x.id === zoneNode.dataset.id);
       if (!z) return;
       if (z.id !== selected) select(z, { announce: false });
-      drag = { kind: e.target.dataset.h || 'move', z, start: p, from: { ...z.rect } };
+      drag = { kind: e.target.dataset.h || 'move', z, start: p, from: { ...z.rect }, px: [e.clientX, e.clientY], moved: false };
     } else {
-      const z = addZone({ x: p.x, y: p.y, w: MIN, h: MIN }, { announce: false });
-      drag = { kind: 'se', z, start: p, from: { ...z.rect }, creating: true };
+      const z = addZone({ x: p.x, y: p.y, w: 0, h: 0 }, { announce: false });
+      drag = { kind: 'se', z, start: p, from: { x: p.x, y: p.y, w: 0, h: 0 }, creating: true, px: [e.clientX, e.clientY], moved: false };
     }
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp, { once: true });
@@ -204,6 +237,8 @@
 
   function onPointerMove(e) {
     if (!drag) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.px[0], e.clientY - drag.px[1]) < CLICK_PX) return;
+    drag.moved = true;
     const p = pointer(e);
     const dx = p.x - drag.start.x;
     const dy = p.y - drag.start.y;
@@ -214,10 +249,10 @@
       y = clamp(f.y + dy, 0, 1 - f.h);
     } else {
       let left = f.x, top = f.y, right = f.x + f.w, bottom = f.y + f.h;
-      if (drag.kind.includes('w')) left = clamp(f.x + dx, 0, right - MIN);
-      if (drag.kind.includes('e')) right = clamp(f.x + f.w + dx, left + MIN, 1);
-      if (drag.kind.includes('n')) top = clamp(f.y + dy, 0, bottom - MIN);
-      if (drag.kind.includes('s')) bottom = clamp(f.y + f.h + dy, top + MIN, 1);
+      if (drag.kind.includes('w')) left = clamp(f.x + dx, 0, right - minW());
+      if (drag.kind.includes('e')) right = clamp(f.x + f.w + dx, left + minW(), 1);
+      if (drag.kind.includes('n')) top = clamp(f.y + dy, 0, bottom - minH());
+      if (drag.kind.includes('s')) bottom = clamp(f.y + f.h + dy, top + minH(), 1);
       x = left; y = top; w = right - left; h = bottom - top;
     }
     drag.z.rect = { x, y, w, h };
@@ -230,13 +265,19 @@
     drag = null;
     if (!d) return;
     // A click without a drag makes a box of a useful size rather than a dot.
-    if (d.creating && d.z.rect.w < 0.02 && d.z.rect.h < 0.02) d.z.rect = fit({ x: d.z.rect.x - 0.1, y: d.z.rect.y - 0.04, w: 0.2, h: 0.08 });
+    // Only a click: a small box drawn on purpose (around a cooldown number)
+    // stays as small as it was drawn.
+    if (d.creating && !d.moved) d.z.rect = fit({ x: d.start.x - 0.1, y: d.start.y - 0.04, w: 0.2, h: 0.08 });
+    // A box that was clicked but not dragged hasn't moved.
+    if (!d.creating && !d.moved) { drawEditor(); return; }
+    d.z.rect = fit(d.z.rect);
     drawEditor();
     say(d.creating ? `New box, ${d.z.name}. ${where(d.z)}` : where(d.z));
   }
 
   function onKey(e) {
     const inName = e.target === $('tbName');
+    if (e.target === $('tbMode') && e.key !== 'Escape' && e.key !== 'Enter') return;
     if (e.key === 'Escape') {
       e.preventDefault();
       if (inName) { $('tbName').blur(); return; }
@@ -291,6 +332,19 @@
     window.addEventListener('keydown', onKey);
     $('tbNew').onclick = () => addZone({ x: 0.375, y: 0.425, w: 0.25, h: 0.15 });
     $('tbDelete').onclick = removeSelected;
+    const modes = Array.isArray(s.modes) && s.modes.length ? s.modes : [['changes', 'Text when it changes']];
+    $('tbMode').replaceChildren(...modes.map(([value, label]) => {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = label;
+      return o;
+    }));
+    $('tbMode').addEventListener('change', () => {
+      const z = current();
+      if (!z) return;
+      z.mode = $('tbMode').value;
+      drawEditor();
+    });
     $('tbSave').onclick = () => finish(true);
     $('tbCancel').onclick = () => finish(false);
     $('tbMove').onclick = () => $('toolbar').classList.toggle('at-bottom');
@@ -324,7 +378,9 @@
       zones: [
         { id: 'a', name: 'Subtitles', rect: { x: 0.15, y: 0.78, w: 0.7, h: 0.15 } },
         { id: 'b', name: 'Objective', rect: { x: 0.72, y: 0.12, w: 0.26, h: 0.18 } },
+        { id: 'c', name: 'Estus', mode: 'count', rect: { x: 0.08, y: 0.86, w: 0.012, h: 0.025 } },
       ],
+      modes: [['changes', 'Text when it changes'], ['new-lines', 'New lines'], ['cooldown', 'Cooldown'], ['count', 'A number'], ['manual', 'When I ask']],
     });
   }
 })();

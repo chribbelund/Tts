@@ -23,11 +23,19 @@
 //
 // A zone:
 //   { id, name, enabled, rect: { x, y, w, h },
-//     mode: changes | new-lines | menu | manual,
+//     mode: changes | new-lines | menu | cooldown | count | manual,
 //     voice: { engine: '' | 'system' | 'kokoro', voiceId, rate, pitch, volume },
 //     interrupt: self | all | none, settle (ms), prefix, ignore, only, color }
 //   ignore: words or /regex/ taken out of the text, one per line
 //   only:   when set, only text matching one of these (one per line) is read
+//   cooldown and count zones are around a number on a game's HUD:
+//     cooldown  a number counting down on an ability's icon; "<name> ready"
+//               is said when it's gone. sayStart also says it when it starts.
+//               readyText is said instead of "<name> ready" when set.
+//               countFrom > 0 counts the last seconds out loud from there:
+//               "<name> 5", "4", "3", "2", "1".
+//     count     potions, ammo, lives: "<name> 4" each time it changes.
+//               low > 0 adds "low" at or below it.
 
 (() => {
   const desktop = window.chatReaderDesktop && window.chatReaderDesktop.screen;
@@ -50,8 +58,14 @@
     ['changes', 'Read the text when it changes (subtitles, dialogue, objectives)'],
     ['new-lines', 'Read only new lines (logs, notifications, game chat)'],
     ['menu', 'Read the highlighted line as it moves (menus, dialogue choices)'],
+    ['cooldown', 'A cooldown: say when it’s ready again (ability icons)'],
+    ['count', 'A number: say it when it changes (potions, ammo, lives)'],
     ['manual', 'Only when I ask (its number key or Read now)'],
   ];
+  // Zones around a number rather than text.
+  const NUMBER_MODES = new Set(['cooldown', 'count']);
+  const isNumberZone = (z) => NUMBER_MODES.has(z.mode);
+  S.isNumberZone = isNumberZone;
   S.MODES = MODES;
 
   const INTERRUPTS = [
@@ -69,12 +83,16 @@
     { name: 'Notifications', rect: { x: 0.01, y: 0.08, w: 0.32, h: 0.3 }, mode: 'new-lines', settle: 400, interrupt: 'none' },
     { name: 'Crosshair', rect: { x: 0.36, y: 0.4, w: 0.28, h: 0.2 }, mode: 'changes', settle: 500, interrupt: 'self' },
     { name: 'Whole screen', rect: { x: 0, y: 0, w: 1, h: 1 }, mode: 'manual', settle: 400, interrupt: 'all' },
+    // Small on purpose: move it over the number with Draw zones on screen.
+    { name: 'Cooldown', rect: { x: 0.47, y: 0.88, w: 0.025, h: 0.04 }, mode: 'cooldown', settle: 100, interrupt: 'none' },
+    { name: 'Potions', rect: { x: 0.08, y: 0.86, w: 0.02, h: 0.035 }, mode: 'count', settle: 150, interrupt: 'self' },
   ];
 
   const ZONE_DEFAULTS = {
     name: 'Zone', enabled: true, rect: { x: 0.3, y: 0.4, w: 0.4, h: 0.2 }, mode: 'changes',
     voice: { engine: '', voiceId: '', rate: 1, pitch: 1, volume: 100 },
     interrupt: 'self', settle: 350, prefix: '', ignore: '', only: '', color: '',
+    sayStart: false, readyText: '', low: 0, countFrom: 0,
   };
 
   const KEY_ACTIONS = [
@@ -97,6 +115,12 @@
 
   const SENSITIVITY = { low: 3, normal: 1.4, high: 0.6 };   // mean grey change, out of 255
   const MAX_WAIT = 1500;     // a zone that never stops changing is still read this often
+  const MAX_WAIT_NUMBER = 350;   // a cooldown's sweep never stops moving; its number is read this often
+  // A cooldown is ready once its number has been gone this long. Text
+  // recognition sometimes misses a digit, but each number of a countdown is
+  // only up for a second, so one missed number can't last this long.
+  const READY_AFTER = 1200;
+  const READY_AFTER_ONE = 500;   // when the last number seen was a 1
   // How old the cursor's text may be: stepping through lines can use what was
   // seen a moment ago, the middle of the screen has to be what's there now.
   const MAP_AGE = { step: 5000, now: 700 };
@@ -116,8 +140,9 @@
 
   function fitRect(r) {
     const src = r && typeof r === 'object' ? r : ZONE_DEFAULTS.rect;
-    const w = clamp(Number(src.w) || 0.1, 0.005, 1);
-    const h = clamp(Number(src.h) || 0.1, 0.005, 1);
+    // Small enough for a cooldown number on a 4K screen.
+    const w = clamp(Number(src.w) || 0.1, 0.002, 1);
+    const h = clamp(Number(src.h) || 0.1, 0.002, 1);
     return { x: clamp(Number(src.x) || 0, 0, 1 - w), y: clamp(Number(src.y) || 0, 0, 1 - h), w, h };
   }
 
@@ -132,6 +157,10 @@
     zone.settle = clamp(Math.round(Number(zone.settle) || 350), 0, 5000);
     zone.ignore = String(zone.ignore || '').slice(0, 2000);
     zone.only = String(zone.only || '').slice(0, 2000);
+    zone.sayStart = !!zone.sayStart;
+    zone.countFrom = clamp(Math.round(Number(zone.countFrom) || 0), 0, 60);
+    zone.readyText = String(zone.readyText || '').slice(0, 80);
+    zone.low = clamp(Math.round(Number(zone.low) || 0), 0, 9999);
     delete zone.isNew;
     return zone;
   }
@@ -401,57 +430,307 @@
     return !!detector;
   }
 
-  // Draws the part of the frame at once (the frame may be replaced while the
-  // text is being read), then reads it. Lines come back with boxes as
-  // fractions of the screen, in reading order.
-  function recognize(frame, rect, { fast = false, full = false } = {}) {
+  // The average colour of part of a frame, to pad a small picture with.
+  const avgCanvas = new OffscreenCanvas(1, 1);
+  const avgCtx = avgCanvas.getContext('2d', { willReadFrequently: true });
+  function averageColour(frame, p) {
+    avgCtx.imageSmoothingQuality = 'high';
+    avgCtx.drawImage(frame, p.x, p.y, p.w, p.h, 0, 0, 1, 1);
+    const [r, g, b] = avgCtx.getImageData(0, 0, 1, 1).data;
+    return `rgb(${r},${g},${b})`;
+  }
+
+  // How a box around a number is shown to text recognition. A lone digit on
+  // its own is often not seen at all, or read upside down (6 for 9): put
+  // after a word it's read as a line of text, the right way up. Tried on
+  // game-style numbers 14 to 70 pixels tall, the first way reads 94% of them,
+  // and the second gets most of the rest, so it's tried when the first finds
+  // no number. The word is taken out again before the number is looked for.
+  const NUMBER_SETUPS = [
+    { height: 48, word: 'No' },
+    { height: 60, word: 'Left' },
+  ];
+  const NUMBER_WORDS = /\b(no|left)\b/gi;
+
+  // Draws part of the frame onto a picture to be read, and says how to turn
+  // a box on that picture back into fractions of the screen. `paddle` draws
+  // it for PaddleOCR, which needs less enlarging and less of a margin than
+  // the system's recognition (measured on game-style text: more of either
+  // made it worse). `line` is a box around one number, read without looking
+  // for lines first: only a small margin.
+  function preparePicture(frame, rect, { full = false, number = null, paddle = false, line = false } = {}) {
     const p = pixelRect(frame, rect);
     // A whole high-resolution screen is read faster a bit smaller, with no
-    // loss for text of a size people read; small text is read better bigger.
-    const limit = Math.min(S.ocr.maxSide || 4096, full ? SCAN_SIDE : 4096);
-    let scale = p.h < 140 && !full ? 2 : 1;
-    scale = Math.min(scale, limit / Math.max(p.w, p.h));
-    const canvas = new OffscreenCanvas(Math.max(1, Math.round(p.w * scale)), Math.max(1, Math.round(p.h * scale)));
+    // loss for text of a size people read. Small text is read better bigger.
+    const limit = Math.min(paddle ? 4096 : S.ocr.maxSide || 4096, full ? SCAN_SIDE : 4096);
+    const small = !full && !line && p.h < 140;
+    let scale = number ? clamp(number.height / p.h, 2, 10) : small ? clamp(160 / p.h, paddle ? 1.5 : 2, paddle ? 6 : 10) : 1;
+    // A box much wider than tall, around a number with room to spare.
+    if (number && p.h >= 100) scale = 1;
+    const word = number ? number.word : '';
+    const iw = Math.max(1, Math.round(p.w * scale));
+    const ih = Math.max(1, Math.round(p.h * scale));
+    // Text recognition misses text that touches the edge of the picture: a
+    // small picture gets a margin round it, in the box's own colour.
+    const padFrac = line ? 0.25 : number ? 0.5 : paddle ? 0.2 : 0.4;
+    const pad = small || number || line ? Math.round(Math.min(ih, 200) * padFrac) : 0;
+    let wordW = 0;
+    let fontPx = 0;
+    if (word) {
+      fontPx = Math.round(ih * 0.6);
+      avgCtx.font = `bold ${fontPx}px Arial, sans-serif`;
+      wordW = Math.ceil(avgCtx.measureText(`${word} `).width);
+    }
+    let cw = iw + wordW + pad * 2;
+    let ch = ih + pad * 2;
+    const fitScale = Math.min(1, limit / Math.max(cw, ch));
+    cw = Math.max(1, Math.round(cw * fitScale));
+    ch = Math.max(1, Math.round(ch * fitScale));
+    const canvas = new OffscreenCanvas(cw, ch);
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.scale(fitScale, fitScale);
+    if (pad || word) { ctx.fillStyle = averageColour(frame, p); ctx.fillRect(0, 0, cw / fitScale, ch / fitScale); }
+    if (word) {
+      ctx.font = `bold ${fontPx}px Arial, sans-serif`;
+      ctx.lineWidth = Math.max(2, fontPx / 10);
+      ctx.strokeStyle = '#000';
+      ctx.fillStyle = '#fff';
+      const base = pad + ih * 0.77;
+      ctx.strokeText(word, pad, base);
+      ctx.fillText(word, pad, base);
+    }
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(frame, p.x, p.y, p.w, p.h, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(frame, p.x, p.y, p.w, p.h, pad + wordW, pad, iw, ih);
+    // Fractions of the picture -> fractions of the screen.
+    const ox = (pad + wordW) * fitScale, oy = pad * fitScale;
+    const sw = iw * fitScale, sh = ih * fitScale;
+    const toScreen = (b) => {
+      const x = clamp((b.x * cw - ox) / sw, 0, 1);
+      const y = clamp((b.y * ch - oy) / sh, 0, 1);
+      const w = clamp((b.w * cw) / sw, 0, 1 - x);
+      const h = clamp((b.h * ch) / sh, 0, 1 - y);
+      return { x: rect.x + x * rect.w, y: rect.y + y * rect.h, w: w * rect.w, h: h * rect.h };
+    };
+    return { canvas, toScreen, word };
+  }
 
+  // One picture through the system's text recognition (or Chromium's).
+  async function readPicture(pic, { fast, digits }) {
+    const { canvas } = pic;
+    let lines = null;
+    if (!S.ocr.fallback) {
+      const t0 = performance.now();
+      const blob = await canvas.convertToBlob({ type: 'image/png' });
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const t1 = performance.now();
+      const res = await desktop.ocr(bytes, { fast: (fast || cfg().fastOcr) && !digits, digits });
+      // How long the last one took, for the page and for working on this.
+      S.ocr.last = { width: canvas.width, height: canvas.height, kb: Math.round(bytes.length / 1024), encodeMs: Math.round(t1 - t0), totalMs: Math.round(performance.now() - t0), helperMs: res.ms || 0 };
+      if (!res.error) {
+        lines = res.lines.map((l) => ({ text: String(l.text || ''), conf: Number(l.conf) || 0, box: { x: l.box[0], y: l.box[1], w: l.box[2], h: l.box[3] } }));
+        if (S.ocr.error) { S.ocr.error = ''; changed(); }
+      } else {
+        const status = await desktop.ocrStatus();
+        Object.assign(S.ocr, { engine: status.engine, running: status.running, error: res.error, maxSide: status.maxSide });
+        // The helper can't run here at all: try Chromium's own.
+        if (!status.running && await canUseDetector()) { S.ocr.fallback = true; S.ocr.engine = 'Chromium'; }
+        changed();
+        if (!S.ocr.fallback) throw new Error(res.error);
+      }
+    }
+    if (!lines) {
+      const found = await detector.detect(canvas);
+      lines = found.map((f) => ({
+        text: f.rawValue || '', conf: 1,
+        box: { x: f.boundingBox.x / canvas.width, y: f.boundingBox.y / canvas.height, w: f.boundingBox.width / canvas.width, h: f.boundingBox.height / canvas.height },
+      }));
+    }
+    for (const l of lines) {
+      l.cropBox = { ...l.box };
+      l.box = pic.toScreen(l.box);
+      if (pic.word) l.text = l.text.replace(NUMBER_WORDS, ' ');
+    }
+    return lines;
+  }
+
+  // --- PaddleOCR --------------------------------------------------------
+  // The app's own text recognition: PaddleOCR's PP-OCRv5 models, run in a
+  // worker (desktop/screen/ocr-worker.js). On game-style text and numbers
+  // it reads far more right than Windows OCR (2% of characters wrong instead
+  // of 11%, a lone digit 99.8% instead of 74%), so "Automatic" uses it on
+  // Windows. Its model reads Latin script: English, Swedish, German, French,
+  // Spanish and about 30 more.
+  const IS_MAC = window.chatReaderDesktop.platform === 'darwin';
+  const LATIN_LANGS = new Set(('en fr de af it es bs pt cs cy da et ga hr uz hu sr id oc is lt mi ms nl no nb nn pl sk sl sq sv sw tl tr la '
+    + 'fi ro ca eu gl lv fil').split(' '));
+  const langCode = (l) => String(l || '').toLowerCase().split('-')[0];
+  const firstLang = () => langCode((navigator.languages && navigator.languages[0]) || navigator.language);
+  // The model often reads å as à. à is only common in French, Portuguese,
+  // Italian and Catalan; for anyone not reading those, it's an å.
+  const A_GRAVE_LANGS = new Set(['fr', 'pt', 'it', 'ca']);
+  const fixNordic = () => !(navigator.languages || [navigator.language]).some((l) => A_GRAVE_LANGS.has(langCode(l)));
+
+  const paddle = { worker: null, ready: null, loaded: false, failed: '', seq: 0, pending: new Map() };
+  S.OCR_ENGINES = [
+    ['auto', 'Automatic'],
+    ['paddle', 'PaddleOCR (built in)'],
+    ['system', IS_MAC ? 'Apple Vision' : 'Windows OCR'],
+  ];
+
+  // Whether pictures go to PaddleOCR rather than the system's recognition.
+  // `full` is a look at the whole screen, for the reading cursor: PaddleOCR
+  // takes about 2 seconds over a 4K screen where Windows OCR takes 0.15, and
+  // reads big, plain screen text no better, so Automatic leaves it to the
+  // system's. Zones are small; there PaddleOCR is quick and much better.
+  function usePaddle({ full = false } = {}) {
+    if (paddle.failed || !desktop || !desktop.paddleFiles) return false;
+    const choice = cfg().ocrEngine || 'auto';
+    if (choice === 'paddle') return true;
+    if (choice === 'system' || full) return false;
+    // Apple Vision reads well already; Windows OCR is the one it beats.
+    return !IS_MAC && LATIN_LANGS.has(firstLang());
+  }
+  S.usesPaddle = usePaddle;
+
+  function startPaddle() {
+    if (paddle.ready) return paddle.ready;
+    paddle.ready = (async () => {
+      const files = await desktop.paddleFiles();
+      if (files.error) throw new Error(files.error);
+      const worker = new Worker(files.workerUrl, { type: 'module' });
+      paddle.worker = worker;
+      const ms = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('the text recognition model took too long to load')), 60000);
+        worker.onerror = (e) => { clearTimeout(timer); reject(new Error(e.message || 'the text recognition worker failed to start')); };
+        worker.onmessage = ({ data }) => {
+          if (data.type === 'ready') { clearTimeout(timer); resolve(data.ms); return; }
+          if (data.type === 'error') { clearTimeout(timer); reject(new Error(data.error)); return; }
+          const job = paddle.pending.get(data.id);
+          if (!job) return;
+          paddle.pending.delete(data.id);
+          if (data.error) job.reject(new Error(data.error)); else job.resolve(data);
+        };
+        worker.postMessage({ type: 'init', ortUrl: files.ortUrl, wasm: files.wasm, det: files.det, rec: files.rec, dict: files.dict });
+      });
+      paddle.loaded = true;
+      Bot.log('info', `Screen reader: PaddleOCR loaded in ${ms} ms.`);
+      changed();
+      return true;
+    })();
+    paddle.ready.catch((err) => {
+      // Back to the system's recognition for the rest of this run.
+      paddle.failed = err.message || String(err);
+      if (paddle.worker) paddle.worker.terminate();
+      paddle.worker = null;
+      for (const job of paddle.pending.values()) job.reject(err);
+      paddle.pending.clear();
+      Bot.log('error', `Screen reader: PaddleOCR couldn’t start (${paddle.failed}); using ${IS_MAC ? 'Apple Vision' : 'Windows OCR'} instead.`);
+      changed();
+    });
+    return paddle.ready;
+  }
+
+  // One picture through PaddleOCR. line: read it as one line, no detection.
+  async function paddleRead(canvas, { line = false, options } = {}) {
+    await startPaddle();
+    const picture = await createImageBitmap(canvas);
+    const id = ++paddle.seq;
+    return new Promise((resolve, reject) => {
+      paddle.pending.set(id, { resolve, reject });
+      paddle.worker.postMessage({ id, picture, line, options }, [picture]);
+    });
+  }
+
+  async function readPaddlePicture(pic, { line = false, options, digits = false } = {}) {
+    const t0 = performance.now();
+    const res = await paddleRead(pic.canvas, { line, options });
+    S.ocr.last = { width: pic.canvas.width, height: pic.canvas.height, kb: 0, encodeMs: 0, totalMs: Math.round(performance.now() - t0), helperMs: res.ms || 0 };
+    if (S.ocr.error) { S.ocr.error = ''; changed(); }
+    const nordic = fixNordic();
+    const lines = [];
+    for (const l of res.lines) {
+      let text = String(l.text || '');
+      if (nordic) text = text.replace(/à/g, 'å').replace(/À/g, 'Å');
+      // Bits of the picture behind the text read as a stray letter or two.
+      if (!digits && (l.conf < 0.6 || (text.replace(/[^\p{L}\p{N}]/gu, '').length <= 2 && l.conf < 0.85))) continue;
+      const box = { x: l.box[0], y: l.box[1], w: l.box[2], h: l.box[3] };
+      lines.push({ text, conf: l.conf, cropBox: { ...box }, box: pic.toScreen(box) });
+    }
+    return lines;
+  }
+
+  // The part of a box that stands out from its edges: the number in a box
+  // drawn loosely round an icon. Null when nothing does, or nearly all of it.
+  const trimCanvas = new OffscreenCanvas(1, 1);
+  const trimCtx = trimCanvas.getContext('2d', { willReadFrequently: true });
+  function trimRect(frame, rect) {
+    const p = pixelRect(frame, rect);
+    if (p.w * p.h > 400 * 400) return null;
+    trimCanvas.width = p.w; trimCanvas.height = p.h;
+    trimCtx.drawImage(frame, p.x, p.y, p.w, p.h, 0, 0, p.w, p.h);
+    const { data } = trimCtx.getImageData(0, 0, p.w, p.h);
+    const lum = (x, y) => { const i = (y * p.w + x) * 4; return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]; };
+    // The background: the middle brightness round the edge.
+    const edge = [];
+    for (let x = 0; x < p.w; x++) edge.push(lum(x, 0), lum(x, p.h - 1));
+    for (let y = 0; y < p.h; y++) edge.push(lum(0, y), lum(p.w - 1, y));
+    edge.sort((a, b) => a - b);
+    const bg = edge[edge.length >> 1];
+    let x1 = p.w, y1 = p.h, x2 = -1, y2 = -1;
+    for (let y = 0; y < p.h; y++) {
+      for (let x = 0; x < p.w; x++) {
+        if (Math.abs(lum(x, y) - bg) <= 70) continue;
+        if (x < x1) x1 = x;
+        if (x > x2) x2 = x;
+        if (y < y1) y1 = y;
+        if (y > y2) y2 = y;
+      }
+    }
+    if (x2 < 0) return null;
+    const m = Math.max(2, (y2 - y1) * 0.25);
+    const l = Math.max(0, x1 - m), t = Math.max(0, y1 - m);
+    const w = Math.min(p.w, x2 + m + 1) - l, h = Math.min(p.h, y2 + m + 1) - t;
+    if (w * h > p.w * p.h * 0.85) return null;
+    return { x: rect.x + (l / p.w) * rect.w, y: rect.y + (t / p.h) * rect.h, w: (w / p.w) * rect.w, h: (h / p.h) * rect.h };
+  }
+
+  // Draws the part of the frame at once (the frame may be replaced, and
+  // closed, while the text is being read), then reads it. Lines come back
+  // with boxes as fractions of the screen. `digits` is for a box around a
+  // number: every way of showing it is drawn now, the next read only if
+  // the one before finds no number.
+  function recognize(frame, rect, { fast = false, full = false, digits = false } = {}) {
+    if (usePaddle({ full })) return recognizePaddle(frame, rect, { full, digits });
+    const pics = digits
+      ? NUMBER_SETUPS.map((number) => preparePicture(frame, rect, { number }))
+      : [preparePicture(frame, rect, { full })];
     const job = ocrChain.then(async () => {
-      let lines = null;
-      if (!S.ocr.fallback) {
-        const t0 = performance.now();
-        const blob = await canvas.convertToBlob({ type: 'image/png' });
-        const bytes = new Uint8Array(await blob.arrayBuffer());
-        const t1 = performance.now();
-        const res = await desktop.ocr(bytes, { fast: fast || cfg().fastOcr });
-        // How long the last one took, for the page and for working on this.
-        S.ocr.last = { width: canvas.width, height: canvas.height, kb: Math.round(bytes.length / 1024), encodeMs: Math.round(t1 - t0), totalMs: Math.round(performance.now() - t0), helperMs: res.ms || 0 };
-        if (!res.error) {
-          lines = res.lines.map((l) => ({ text: String(l.text || ''), conf: Number(l.conf) || 0, box: { x: l.box[0], y: l.box[1], w: l.box[2], h: l.box[3] } }));
-          if (S.ocr.error) { S.ocr.error = ''; changed(); }
-        } else {
-          const status = await desktop.ocrStatus();
-          Object.assign(S.ocr, { engine: status.engine, running: status.running, error: res.error, maxSide: status.maxSide });
-          // The helper can't run here at all: try Chromium's own.
-          if (!status.running && await canUseDetector()) { S.ocr.fallback = true; S.ocr.engine = 'Chromium'; }
-          changed();
-          if (!S.ocr.fallback) throw new Error(res.error);
-        }
+      let lines = [];
+      for (const pic of pics) {
+        lines = await readPicture(pic, { fast, digits });
+        if (!digits || readNumber(lines.map((l) => l.text).join(' ')) !== null) break;
       }
-      if (!lines) {
-        const found = await detector.detect(canvas);
-        lines = found.map((f) => ({
-          text: f.rawValue || '', conf: 1,
-          box: { x: f.boundingBox.x / canvas.width, y: f.boundingBox.y / canvas.height, w: f.boundingBox.width / canvas.width, h: f.boundingBox.height / canvas.height },
-        }));
+      return { lines, canvas: pics[0].canvas };
+    });
+    ocrChain = job.catch(() => {});
+    return job;
+  }
+
+  // A number: lines found the usual way, but more readily (a lone digit
+  // is a small, faint mark to the detection model); then, if no number came
+  // of it, the box trimmed to what stands out, read as one line.
+  function recognizePaddle(frame, rect, { full, digits }) {
+    const pic = preparePicture(frame, rect, { full, paddle: true });
+    const trimmed = digits ? trimRect(frame, rect) : null;
+    const linePic = trimmed ? preparePicture(frame, trimmed, { paddle: true, line: true }) : null;
+    const options = digits ? { thresh: 0.2, boxThresh: 0.4, widen: false } : { maxSide: full ? SCAN_SIDE : 1600 };
+    const job = ocrChain.then(async () => {
+      let lines = await readPaddlePicture(pic, { options, digits });
+      if (linePic && readNumber(lines.map((l) => l.text).join(' ')) === null) {
+        const more = await readPaddlePicture(linePic, { line: true, digits });
+        if (readNumber(more.map((l) => l.text).join(' ')) !== null) lines = more;
       }
-      // Fractions of the crop -> fractions of the screen.
-      for (const l of lines) {
-        const b = l.box;
-        l.cropBox = { ...b };
-        l.box = { x: rect.x + b.x * rect.w, y: rect.y + b.y * rect.h, w: b.w * rect.w, h: b.h * rect.h };
-      }
-      return { lines, canvas };
+      return { lines, canvas: pic.canvas };
     });
     ocrChain = job.catch(() => {});
     return job;
@@ -523,9 +802,11 @@
 
   function clean(lines, zone = null) {
     const rules = ignoreRules(zone);
+    // A lone digit comes back with low confidence even when it's right.
+    const minConf = zone && isNumberZone(zone) ? 0.1 : 0.25;
     const out = [];
     for (const l of lines) {
-      if (l.conf < 0.25) continue;
+      if (l.conf < minConf) continue;
       let text = squash(l.text);
       for (const re of rules) text = text.replace(re, ' ');
       text = squash(text);
@@ -535,6 +816,25 @@
     }
     return readingOrder(out);
   }
+
+  // The number in a zone's text: "12", "0.5", "x3", "5/10" (the 5), "12s".
+  // Without any digit, letters that look like digits are tried ("S" for 5,
+  // "O" for 0), as a lone digit is often read as a letter.
+  const LOOKALIKE = { O: '0', o: '0', I: '1', l: '1', '|': '1', i: '1', Z: '2', z: '2', S: '5', s: '5', B: '8' };
+  function readNumber(text) {
+    const t = squash(text);
+    let m = /\d+(?:[.,]\d+)?/.exec(t);
+    if (!m) {
+      const token = t.split(' ').find((w) => /^[OoIl|iZzSsB]{1,3}$/.test(w));
+      if (token) m = [token.replace(/./g, (ch) => LOOKALIKE[ch])];
+    }
+    if (!m) return null;
+    const n = Number(m[0].replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  }
+  S.readNumber = readNumber;
+  // As said: "0.5" stays "0.5", "12.0" is "12".
+  const sayNumber = (n) => String(Math.round(n * 10) / 10);
 
   const union = (boxes) => {
     if (!boxes.length) return null;
@@ -765,7 +1065,7 @@
       if (difference(sig, st.ocrSig) <= threshold) { st.dirtySince = 0; continue; }
       if (!st.dirtySince) st.dirtySince = now;
       const settled = now - st.changedAt >= zone.settle;
-      const waitedLong = now - st.dirtySince >= zone.settle + MAX_WAIT;
+      const waitedLong = now - st.dirtySince >= zone.settle + (isNumberZone(zone) ? MAX_WAIT_NUMBER : MAX_WAIT);
       if (!settled && !waitedLong) continue;
       st.busy = true;
       st.ocrSig = sig;
@@ -777,7 +1077,7 @@
 
   function readZoneText(zone, st, frame) {
     let job;
-    try { job = recognize(frame, zone.rect); } catch (err) { st.busy = false; setProblem(err.message); return; }
+    try { job = recognize(frame, zone.rect, { digits: isNumberZone(zone) }); } catch (err) { st.busy = false; setProblem(err.message); return; }
     job.then(({ lines, canvas }) => {
       st.busy = false;
       if (!running()) return;
@@ -800,7 +1100,83 @@
     return true;
   }
 
+  // What a number zone is called out loud: its "Say first", or its name.
+  const numberLabel = (zone) => zone.prefix || zone.name;
+
+  function sayCount(zone, n, rect) {
+    const low = zone.low > 0 && n <= zone.low ? ', low' : '';
+    S.last.set(zone.id, { text: sayNumber(n), at: Date.now() });
+    say({ text: `${numberLabel(zone)} ${sayNumber(n)}${low}`, voice: zone.voice, zone: zone.id, rect: rect || zone.rect, interrupt: zone.interrupt });
+  }
+
+  // A number zone believes what it reads twice in a row: one misread digit
+  // shouldn't be said, and a cooldown shouldn't be "ready" because one look
+  // missed the number. Until then the zone is looked at again straight away.
+  function handleNumber(zone, st, lines) {
+    const n = readNumber(lines.map((l) => l.text).join(' '));
+    const rect = zone.rect;
+    const key = n === null ? 'none' : String(n);
+    // A cooldown ticks down between looks; any number agrees with any other.
+    const same = zone.mode === 'cooldown' ? (key === 'none') === (st.numCandidate === 'none') : key === st.numCandidate;
+    if (st.numCandidate !== undefined && same) st.numHits++;
+    else st.numHits = 1;
+    st.numCandidate = key;
+    if (zone.mode === 'cooldown' && n === null) st.noneSince = st.noneSince || Date.now();
+    else st.noneSince = 0;
+    // After a 1 the number going is expected: it needn't be gone as long.
+    const readyAfter = st.lastSec !== undefined && st.lastSec <= 1 ? READY_AFTER_ONE : READY_AFTER;
+    const sure = st.numHits >= 2 && !(st.noneSince && Date.now() - st.noneSince < readyAfter);
+    if (!sure) st.ocrSig = null;   // read it once more
+    if (zone.mode === 'count') {
+      if (n === null || !sure || n === st.numValue) return;
+      const first = st.numValue === undefined;
+      st.numValue = n;
+      // The first look only learns what's there.
+      if (first) { S.last.set(zone.id, { text: sayNumber(n), at: Date.now() }); live(); return; }
+      sayCount(zone, n, rect);
+      return;
+    }
+    // A cooldown: a number while it's counting down, none once it's ready.
+    if (!sure) return;
+    const before = st.cooldown;   // undefined at first, then 'cooling' or 'ready'
+    if (n === null) {
+      st.cooldown = 'ready';
+      if (before === 'cooling') {
+        S.last.set(zone.id, { text: 'Ready', at: Date.now() });
+        say({ text: zone.readyText || `${numberLabel(zone)} ready`, voice: zone.voice, zone: zone.id, rect: zone.rect, interrupt: zone.interrupt });
+      }
+      return;
+    }
+    S.last.set(zone.id, { text: `${sayNumber(n)} left`, at: Date.now() });
+    live();
+    const sec = Math.ceil(n);
+    st.lastSec = sec;
+    // A number well above the last one counted is the ability used again
+    // (or reset) mid-countdown: a new countdown.
+    if (st.countSaid !== undefined && sec > st.countSaid + 2) st.countSaid = undefined;
+    const counting = zone.countFrom > 0 && sec >= 1 && sec <= zone.countFrom;
+    if (before !== 'cooling') {
+      st.cooldown = 'cooling';
+      st.countSaid = undefined;
+      // The countdown says it anyway when it starts that low.
+      if (before === 'ready' && zone.sayStart && !counting) say({ text: `${numberLabel(zone)} ${sayNumber(n)}`, voice: zone.voice, zone: zone.id, rect, interrupt: zone.interrupt });
+    }
+    if (counting) countDown(zone, st, sec);
+  }
+
+  // The last seconds of a cooldown, out loud: "Flash 5", "4", "3", "2", "1",
+  // then "Flash ready". Each second once, and only going down: a misread
+  // higher digit isn't said.
+  function countDown(zone, st, sec) {
+    if (st.countSaid !== undefined && sec >= st.countSaid) return;
+    const first = st.countSaid === undefined;
+    st.countSaid = sec;
+    // A number not finished yet gives way to the next one.
+    say({ text: first ? `${numberLabel(zone)} ${sec}` : String(sec), voice: zone.voice, zone: zone.id, rect: zone.rect, interrupt: 'self' });
+  }
+
   function handleZoneText(zone, st, lines) {
+    if (isNumberZone(zone)) { handleNumber(zone, st, lines); return; }
     const now = Date.now();
     st.recent = st.recent.filter((r) => now - r.at < 5000);
     if (zone.mode === 'changes') {
@@ -844,9 +1220,18 @@
     if (!zone) { navSay(`There is no zone ${typeof zoneOrIndex === 'number' ? zoneOrIndex + 1 : ''}.`); return; }
     if (!(await ensureCapture()) || !cap.frame) { navSay(S.problem || 'The screen can’t be captured.'); return; }
     try {
-      const { lines } = await recognize(cap.frame, zone.rect);
+      const { lines } = await recognize(cap.frame, zone.rect, { digits: isNumberZone(zone) });
       const clean_ = clean(lines, zone);
       const text = clean_.map((l) => l.text).join(' ');
+      if (isNumberZone(zone)) {
+        const n = readNumber(text);
+        const said = n !== null ? `${numberLabel(zone)} ${sayNumber(n)}`
+          : zone.mode === 'cooldown' ? (zone.readyText || `${numberLabel(zone)} ready`)
+            : `No number in ${zone.name}.`;
+        if (n !== null) S.last.set(zone.id, { text: sayNumber(n), at: Date.now() });
+        say({ text: said, voice: zone.voice, zone: zone.id, rect: zone.rect, interrupt: 'all' });
+        return;
+      }
       const st = stateFor(zone.id);
       st.lastNorm = comparable(text);
       st.lastText = text;
@@ -1074,13 +1459,20 @@
   // Editing on screen
   // -------------------------------------------------------------------------
 
+  // Short names for the editor's "Reads" list.
+  const EDITOR_MODE_LABELS = {
+    changes: 'Text when it changes', 'new-lines': 'New lines (chat, logs)', menu: 'Highlighted line (menus)',
+    cooldown: 'Cooldown: say when ready', count: 'A number: potions, ammo', manual: 'Only when I ask',
+  };
+
   S.editing = false;
   S.editOnScreen = async ({ selected = '', hideMain = true } = {}) => {
     if (!desktop || S.editing) return null;
     S.editing = true;
     changed();
     try {
-      const result = await desktop.editZones({ display: S.profile().display, zones: Bot.clone(S.zones()), selected, hideMain });
+      const modes = MODES.map(([m]) => [m, EDITOR_MODE_LABELS[m] || m]);
+      const result = await desktop.editZones({ display: S.profile().display, zones: Bot.clone(S.zones()), modes, selected, hideMain });
       if (!result || result.canceled || !Array.isArray(result.zones)) { navSay('Zones not changed.'); return null; }
       const profile = S.profile();
       const before = new Map(profile.zones.map((z) => [z.id, z]));
@@ -1088,8 +1480,11 @@
       result.zones.forEach((z, i) => {
         // The editor only moves, sizes and names; the rest stays as it was.
         const old = before.get(z.id);
-        if (old) zones.push(normalizeZone({ ...old, name: z.name, rect: z.rect }, i));
-        else zones.push(normalizeZone({ id: z.id, name: z.name, rect: z.rect, color: z.color, voice: S.voiceForNewZone(zones) }, i));
+        const mode = MODES.some(([m]) => m === z.mode) ? z.mode : (old ? old.mode : 'changes');
+        // A zone that just became a number zone answers faster.
+        const numberDefaults = NUMBER_MODES.has(mode) && (!old || !NUMBER_MODES.has(old.mode)) ? { settle: mode === 'cooldown' ? 100 : 150 } : {};
+        if (old) zones.push(normalizeZone({ ...old, name: z.name, rect: z.rect, mode, ...numberDefaults }, i));
+        else zones.push(normalizeZone({ id: z.id, name: z.name, rect: z.rect, color: z.color, mode, voice: S.voiceForNewZone(zones), ...numberDefaults }, i));
       });
       profile.zones = zones;
       for (const id of before.keys()) if (!profile.zones.some((z) => z.id === id)) zoneState.delete(id);
@@ -1135,8 +1530,17 @@
 
   S.checkOcr = async (start = false) => {
     if (!desktop) return S.ocr;
+    if (usePaddle()) {
+      if (start) await startPaddle().catch(() => {});
+      // It may have just failed to start, and the system's is used instead.
+      if (usePaddle()) {
+        Object.assign(S.ocr, { engine: 'PaddleOCR', running: paddle.loaded, error: '', maxSide: 4096, supported: true, fallback: false });
+        changed();
+        return S.ocr;
+      }
+    }
     const status = await desktop.ocrStatus({ start });
-    Object.assign(S.ocr, { engine: S.ocr.fallback ? 'Chromium' : status.engine, running: status.running, error: status.error, maxSide: status.maxSide, supported: status.supported });
+    Object.assign(S.ocr, { engine: S.ocr.fallback ? 'Chromium' : status.engine, running: status.running, error: status.error || (paddle.failed ? `PaddleOCR couldn’t start: ${paddle.failed}` : ''), maxSide: status.maxSide, supported: status.supported });
     changed();
     return S.ocr;
   };
@@ -1148,12 +1552,22 @@
     const x = c.getContext('2d');
     x.fillStyle = '#14141c'; x.fillRect(0, 0, 560, 90);
     x.fillStyle = '#fff'; x.font = '600 34px system-ui, sans-serif'; x.fillText('Text recognition works', 18, 58);
-    const blob = await c.convertToBlob({ type: 'image/png' });
     const started = performance.now();
+    if (usePaddle()) {
+      try {
+        const res = await paddleRead(c);
+        await S.checkOcr();
+        return { text: res.lines.map((l) => l.text).join(' '), ms: Math.round(performance.now() - started), engine: 'PaddleOCR' };
+      } catch (err) {
+        // Failed to start: fall through to the system's.
+        if (!paddle.failed) throw err;
+      }
+    }
+    const blob = await c.convertToBlob({ type: 'image/png' });
     const res = await desktop.ocr(new Uint8Array(await blob.arrayBuffer()), {});
     await S.checkOcr();
     if (res.error) throw new Error(res.error);
-    return { text: res.lines.map((l) => l.text).join(' '), ms: Math.round(performance.now() - started) };
+    return { text: res.lines.map((l) => l.text).join(' '), ms: Math.round(performance.now() - started), engine: S.ocr.engine };
   };
 
   S.preview = (voice, text) => say({ text, voice, zone: '__preview', interrupt: 'all' });

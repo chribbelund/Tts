@@ -17,10 +17,14 @@
     <h1 id="tbTitle">Reading zones</h1>
     <button type="button" id="tbMove" class="tb-btn small" title="Move this bar to the other edge of the screen">Move bar</button>
   </div>
-  <p class="tb-help" id="tbHelp">Drag on the screen to draw a box around text to read. Drag a box to move it, its corners to resize it.</p>
+  <p class="tb-help" id="tbHelp">Drag on the screen to draw a box around text to read. Drag a box to move it, its corners to resize it. For a cooldown or a potion count, draw a small box tight around the number and pick what it reads.</p>
   <div class="tb-row">
     <label for="tbName">Name</label>
     <input id="tbName" maxlength="40" spellcheck="false" autocomplete="off">
+    <label for="tbMode">Reads</label>
+    <select id="tbMode"></select>
+  </div>
+  <div class="tb-row">
     <span id="tbPos" class="tb-pos" aria-hidden="true"></span>
   </div>
   <div class="tb-row tb-actions">
