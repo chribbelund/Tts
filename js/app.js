@@ -31,6 +31,7 @@ const DEFAULTS = {
   quoteParent: false,
   readEvents: true,
   readAnnouncements: true, // Twitch /announce messages from mods and the streamer
+  readSharedChat: true,  // in a Twitch collab, also read the partners' chats
   readEmojis: false,
   emoteMode: 'skip-all', // skip-all | skip-twitch | read
   readEmoteOnly: true,   // a message with nothing but emotes: read their names
@@ -79,7 +80,7 @@ const NUMBER_SETTINGS = ['maxLength', 'catchUp', 'cheerPriority', 'cheerEffects'
 const TEXT_SETTINGS = ['replayStartText', 'replayEndText'];
 const CHECKBOX_SETTINGS = [
   ...APPEARANCE_SETTINGS, 'announce',
-  'varyVoices', 'collapseNames', 'quoteParent', 'readEvents', 'readAnnouncements', 'readEmojis',
+  'varyVoices', 'collapseNames', 'quoteParent', 'readEvents', 'readAnnouncements', 'readSharedChat', 'readEmojis',
   'skipCommands', 'skipLinks', 'replayAnnounce',
   'cheerAnnounce', 'highlightPriority', 'voiceConfirm',
 ];
@@ -1417,6 +1418,8 @@ function setSharedPrefs(chat, mode, muted = sharedPrefs(chat).muted) {
 }
 
 function sharedAllowed(chat, part) {
+  // The switch in Settings → What's read turns partners' chats off everywhere.
+  if (!settings.readSharedChat) return part.own;
   const prefs = sharedPrefs(chat);
   if (prefs.mode === 'own') return part.own;
   if (prefs.mode === 'pick') return !prefs.muted.includes(part.roomId);
@@ -1501,16 +1504,18 @@ function setSharedName(roomId, login) {
 function renderSharedButton(chat) {
   const btn = chat.sharedBtn;
   if (!btn) return;
+  // Twitch tags every message with its source room while a collab is on, the
+  // channel's own included, so one message from anyone is enough to know.
   const parts = [...chat.shared.values()];
-  const collab = parts.some((p) => !p.own);
-  btn.hidden = !collab;
-  if (!collab) return;
+  btn.hidden = !parts.length;
+  if (!parts.length) return;
   const reading = parts.filter((p) => sharedAllowed(chat, p)).length;
-  const mode = sharedPrefs(chat).mode;
+  const mode = settings.readSharedChat ? sharedPrefs(chat).mode : 'own';
   const short = mode === 'own' ? 'own chat' : reading === parts.length ? `all ${parts.length}` : `${reading} of ${parts.length}`;
-  btn.textContent = `Collab · ${short}`;
+  // Until a partner writes, only the channel's own chat is known.
+  btn.textContent = parts.length === 1 && mode !== 'own' ? 'Collab' : `Collab · ${short}`;
   btn.dataset.mode = mode;
-  btn.title = `#${chat.client.channel} shares its chat with ${parts.length - 1} other channel${parts.length > 2 ? 's' : ''}. Pick whose messages are read.`;
+  btn.title = `#${chat.client.channel} is sharing its chat with other channels. Pick whose messages are read.`;
 }
 
 function buildSharedPanel(chat) {
@@ -1530,14 +1535,15 @@ function buildSharedPanel(chat) {
       el('label', { class: 'check' }, box, ' ', sharedName(part.roomId), part.own ? el('span', { class: 'shared-own' }, ' (this channel)') : null),
       part.countEl);
   });
-  const panel = el('div', { class: 'popover shared-panel', role: 'dialog', 'aria-label': `Collab chats for ${channel}` },
-    el('p', { class: 'shared-head' }, `${channel} is sharing its chat with ${parts.length - 1} other channel${parts.length > 2 ? 's' : ''}. Read messages from:`),
+  const panel = el('div', { class: 'popover shared-panel', role: 'dialog', tabindex: '-1', 'aria-label': `Collab chats for ${channel}` },
+    el('p', { class: 'shared-head' }, `${channel} is sharing its chat with other channels. Read messages from:`),
+    settings.readSharedChat ? null : el('p', { class: 'hint shared-off' }, 'Partners’ chats are turned off in Settings → What’s read, so only this channel’s own chat is read.'),
     el('div', { class: 'shared-modes', role: 'radiogroup', 'aria-label': 'Whose messages to read' },
       radio('all', 'Every chat in the collab'),
       radio('own', `Only ${channel}’s own chat`),
       radio('pick', 'Only the chats ticked below')),
     el('ul', { class: 'shared-list', 'aria-label': 'Chats in the collab' }, rows),
-    el('p', { class: 'hint' }, 'Messages from chats that are left out are dropped before they reach the queue, chat commands included. The choice is remembered for this channel.'),
+    el('p', { class: 'hint' }, 'A partner’s chat shows up in this list once someone writes there. Messages from chats that are left out are dropped before they reach the queue, chat commands included. The choice is remembered for this channel.'),
   );
   panel.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.preventDefault(); closeSharedPanel(chat, { focus: true }); }
@@ -1562,10 +1568,15 @@ function updateSharedPanel(chat) {
   const panel = chat.sharedPanel;
   if (!panel) return;
   const mode = sharedPrefs(chat).mode;
-  for (const input of panel.querySelectorAll('input[type="radio"]')) input.checked = input.value === mode;
+  const off = !settings.readSharedChat;
+  for (const input of panel.querySelectorAll('input[type="radio"]')) {
+    input.checked = input.value === mode;
+    input.disabled = off;
+  }
   for (const input of panel.querySelectorAll('input[type="checkbox"]')) {
     const part = chat.shared.get(input.dataset.room);
     if (part) input.checked = sharedAllowed(chat, part);
+    input.disabled = off;
   }
   for (const part of chat.shared.values()) updateSharedCounts(chat, part);
 }
@@ -1584,8 +1595,8 @@ function openSharedPanel(chat) {
   chat.sharedPanel.hidden = false;
   updateSharedPanel(chat);
   chat.sharedBtn.setAttribute('aria-expanded', 'true');
-  const current = chat.sharedPanel.querySelector('input[type="radio"]:checked');
-  if (current) current.focus();
+  const current = chat.sharedPanel.querySelector('input[type="radio"]:checked:not(:disabled)');
+  (current || chat.sharedPanel).focus();
 }
 
 function closeSharedPanel(chat, { focus = false } = {}) {
@@ -2778,6 +2789,7 @@ const SETTING_CHECKS = {
   quoteParent: accept.bool,
   readEvents: accept.bool,
   readAnnouncements: accept.bool,
+  readSharedChat: accept.bool,
   readEmojis: accept.bool,
   emoteMode: accept.oneOf('skip-all', 'skip-twitch', 'read'),
   readEmoteOnly: accept.bool,
@@ -3326,6 +3338,13 @@ for (const key of CHECKBOX_SETTINGS) {
     if (APPEARANCE_SETTINGS.includes(key)) {
       applyAppearance();
       renderNow();   // the chatter's own name colour is dropped in high contrast
+    }
+    if (key === 'readSharedChat') {
+      for (const chat of chats) {
+        if (!chat.sharedBtn) continue;
+        renderSharedButton(chat);
+        if (chat.sharedPanel) buildSharedPanel(chat);
+      }
     }
   });
 }
