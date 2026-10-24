@@ -2,9 +2,10 @@
 
 // The window the screen reader puts over a game (see overlay.html).
 //   markers: the zone outlines and the box around what's being read
-//   editor:  drawing, moving and resizing zones, by mouse or by keyboard
-// Positions are fractions of the screen, so a zone stays put when the game's
-// resolution changes.
+//   editor:  drawing, moving and resizing zones, by mouse or by keyboard,
+//            over the screen or over a screenshot of a game
+// Positions are fractions of the screen (or of the screenshot), so a zone
+// stays put when the game's resolution changes.
 
 (() => {
   // Opened on its own (overlay.html?demo) it shows the editor with a pretend
@@ -30,12 +31,27 @@
 
   // The screen, inside this window. Zones are fractions of the screen, and
   // the window may not cover all of it (or may start above it), so the stage
-  // is sized and placed as the screen itself.
+  // is sized and placed as the screen itself. Over a screenshot, the stage is
+  // the screenshot, as big as fits on the screen.
+  let frame = null;
+  let picture = null;   // { url, width, height }
+  function layoutStage() {
+    let { x, y, width, height } = frame || { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+    if (!(width > 0) || !(height > 0)) return;
+    if (picture) {
+      const s = Math.min(width / picture.width, height / picture.height);
+      const w = picture.width * s, h = picture.height * s;
+      x += (width - w) / 2; y += (height - h) / 2; width = w; height = h;
+    }
+    Object.assign(stage.style, { inset: 'auto', left: `${x}px`, top: `${y}px`, width: `${width}px`, height: `${height}px` });
+  }
   function applyFrame(f) {
     if (!f || !(f.width > 0) || !(f.height > 0)) return;
-    Object.assign(stage.style, { inset: 'auto', left: `${f.x}px`, top: `${f.y}px`, width: `${f.width}px`, height: `${f.height}px` });
+    frame = f;
+    layoutStage();
   }
   api.onFrame(applyFrame);
+  window.addEventListener('resize', () => { if (picture && !frame) layoutStage(); });
   const stageSize = () => {
     const r = stage.getBoundingClientRect();
     return r.width > 0 && r.height > 0 ? r : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
@@ -132,7 +148,7 @@
   }
 
   function drawEditor() {
-    document.body.className = 'editor';
+    document.body.className = picture ? 'editor picture' : 'editor';
     for (const [id, node] of nodes) {
       if (!zones.some((z) => z.id === id)) { node.remove(); nodes.delete(id); }
     }
@@ -325,9 +341,19 @@
   }
 
   function startEditor(s) {
+    if (s.picture && s.picture.url) {
+      picture = s.picture;
+      const img = el('img', 'stage-picture');
+      img.alt = '';
+      img.src = picture.url;
+      stage.prepend(img);
+      layoutStage();
+      $('tbTitle').textContent = 'Zones on a screenshot';
+      $('tbHelp').textContent = 'These boxes are suggestions from the text found in the screenshot. Move, resize, rename or delete them, and draw more. Saving makes them a new profile.';
+    }
     zones = (s.zones || []).map((z, i) => ({ ...z, rect: fit(z.rect || { x: 0.3, y: 0.3, w: 0.4, h: 0.2 }), color: z.color || COLORS[i % COLORS.length] }));
     $('toolbar').hidden = false;
-    document.title = 'Reading zones';
+    document.title = picture ? 'Zones on a screenshot' : 'Reading zones';
     stage.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKey);
     $('tbNew').onclick = () => addZone({ x: 0.375, y: 0.425, w: 0.25, h: 0.15 });
@@ -355,9 +381,10 @@
       drawEditor();
     });
     select(zones.find((z) => z.id === s.selected) || zones[0] || null, { announce: false });
+    const what = picture ? `A screenshot with ${zones.length} suggested zone${zones.length === 1 ? '' : 's'}.` : `Editing ${zones.length} reading zone${zones.length === 1 ? '' : 's'}.`;
     say(zones.length
-      ? `Editing ${zones.length} reading zone${zones.length === 1 ? '' : 's'}. Tab moves between them, arrow keys move one, N makes a new one. Enter saves, Escape cancels.`
-      : 'Draw a box around text to read, or press N for a new box. Enter saves, Escape cancels.');
+      ? `${what} Tab moves between them, arrow keys move one, N makes a new one. Enter saves, Escape cancels.`
+      : `${picture ? 'No text was found in the screenshot. ' : ''}Draw a box around text to read, or press N for a new box. Enter saves, Escape cancels.`);
     window.focus();
   }
 

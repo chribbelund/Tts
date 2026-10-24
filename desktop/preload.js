@@ -97,7 +97,10 @@ contextBridge.exposeInMainWorld('chatReaderDesktop', {
     ocrStatus: (options) => ipcRenderer.invoke('screen:ocr-status', options || {}),
     // PaddleOCR's worker and files: { workerUrl, ortUrl, wasm, det, rec, dict } or { error }.
     paddleFiles: () => ipcRenderer.invoke('screen:paddle-files'),
-    // Opens the zone editor over a screen; resolves with { zones } or { canceled }.
+    // The games with ready-made zones, as written in screen/games/*.json.
+    games: () => ipcRenderer.invoke('screen:games'),
+    // Opens the zone editor over a screen (or over a screenshot, with
+    // picture: { url, width, height }); resolves with { zones } or { canceled }.
     editZones: (payload) => ipcRenderer.invoke('screen:edit', payload),
     setMarkers: (state) => ipcRenderer.send('screen:markers', state),
     setLens: (state) => ipcRenderer.send('screen:lens', state),

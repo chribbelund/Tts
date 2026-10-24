@@ -69,6 +69,7 @@
         id: 'screen', label: 'Screen reader', lead: 'Reads text from anywhere on the screen out loud, without following the mouse, so it works in games that lock the mouse in the middle.',
         subs: [
           { id: 'overview', label: 'Overview', parts: ['tab:screen#status'] },
+          { id: 'games', label: 'Games', parts: ['tab:screen#games'] },
           { id: 'zones', label: 'Zones', parts: ['tab:screen#zones'] },
           { id: 'profiles', label: 'Profiles', parts: ['tab:screen#profile'] },
           { id: 'cursor', label: 'Reading cursor', parts: ['tab:screen#cursor'] },

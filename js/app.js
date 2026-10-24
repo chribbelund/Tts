@@ -3771,7 +3771,7 @@ function loadBot() {
   if (!base) return;
   document.head.append(el('link', { rel: 'stylesheet', href: `${base}bot.css` }));
   // In order, each after the one before, like the <script> tags above.
-  const files = ['core.js', 'twitch.js', 'eventsub.js', 'variables.js', 'effects.js', 'triggers.js', 'community.js', 'obs.js', 'spotify.js', 'relay.js', 'importers.js', 'screen.js', 'ui.js', 'ui-tabs.js', 'ui-multistream.js', 'ui-spotify.js', 'ui-screen.js', 'dashboard.js', 'integrations.js', 'shell.js', 'setup.js', 'start.js'];
+  const files = ['core.js', 'twitch.js', 'eventsub.js', 'variables.js', 'effects.js', 'triggers.js', 'community.js', 'obs.js', 'spotify.js', 'relay.js', 'importers.js', 'screen-layout.js', 'screen.js', 'ui.js', 'ui-tabs.js', 'ui-multistream.js', 'ui-spotify.js', 'ui-screen.js', 'dashboard.js', 'integrations.js', 'shell.js', 'setup.js', 'start.js'];
   const next = (i) => {
     if (i >= files.length) return;
     const script = el('script', { src: `${base}${files[i]}` });

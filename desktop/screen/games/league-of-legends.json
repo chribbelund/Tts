@@ -1,0 +1,24 @@
+{
+  "format": "chat-reader-game",
+  "version": 1,
+  "id": "league-of-legends",
+  "name": "League of Legends",
+  "apps": ["League of Legends.exe", "League of Legends"],
+  "ref": { "width": 1920, "height": 1080, "aspect": 0 },
+  "notes": "The ability, summoner spell, health, gold and scoreboard boxes were measured on the game's HUD; chat and announcements are placed from the default layout. Each ability box sits in the middle of its icon, below the mana cost. Fit in game, during a match. Rename D and F to your summoner spells (Flash, Ignite) so you hear “Flash ready”.",
+  "zones": [
+    { "name": "Q", "rect": { "x": 0.4243, "y": 0.9305, "w": 0.012, "h": 0.0176 }, "anchor": "b", "mode": "cooldown", "settle": 100, "interrupt": "none" },
+    { "name": "W", "rect": { "x": 0.4472, "y": 0.9305, "w": 0.012, "h": 0.0176 }, "anchor": "b", "mode": "cooldown", "settle": 100, "interrupt": "none" },
+    { "name": "E", "rect": { "x": 0.4702, "y": 0.9305, "w": 0.012, "h": 0.0176 }, "anchor": "b", "mode": "cooldown", "settle": 100, "interrupt": "none" },
+    { "name": "Ultimate", "rect": { "x": 0.4928, "y": 0.9305, "w": 0.0146, "h": 0.0176 }, "anchor": "b", "mode": "cooldown", "settle": 100, "interrupt": "none" },
+    { "name": "D", "rect": { "x": 0.5163, "y": 0.9244, "w": 0.0136, "h": 0.0195 }, "anchor": "b", "mode": "cooldown", "settle": 100, "interrupt": "none" },
+    { "name": "F", "rect": { "x": 0.5335, "y": 0.9244, "w": 0.0136, "h": 0.0195 }, "anchor": "b", "mode": "cooldown", "settle": 100, "interrupt": "none" },
+    { "name": "Health", "rect": { "x": 0.4443, "y": 0.9648, "w": 0.0625, "h": 0.02 }, "anchor": "b", "mode": "manual", "settle": 150, "interrupt": "all", "fit": "number", "lineH": 0.0135 },
+    { "name": "Gold", "rect": { "x": 0.5708, "y": 0.9791, "w": 0.0287, "h": 0.0185 }, "anchor": "b", "mode": "manual", "settle": 150, "interrupt": "all", "fit": "number" },
+    { "name": "Stats", "rect": { "x": 0.2917, "y": 0.9167, "w": 0.0703, "h": 0.0787 }, "anchor": "b", "mode": "manual", "settle": 300, "interrupt": "all", "fit": "any", "lineH": 0.0185 },
+    { "name": "Score", "rect": { "x": 0.808, "y": 0, "w": 0.192, "h": 0.028 }, "anchor": "tr", "mode": "manual", "settle": 300, "interrupt": "all", "fit": "any", "lineH": 0.0177 },
+    { "name": "Chat", "rect": { "x": 0.005, "y": 0.62, "w": 0.27, "h": 0.21 }, "anchor": "bl", "mode": "new-lines", "settle": 400, "interrupt": "none" },
+    { "name": "Announcements", "rect": { "x": 0.3, "y": 0.13, "w": 0.4, "h": 0.11 }, "anchor": "t", "mode": "changes", "settle": 300, "interrupt": "all" }
+  ],
+  "landmarks": []
+}

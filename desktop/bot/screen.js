@@ -36,10 +36,31 @@
 //               "<name> 5", "4", "3", "2", "1".
 //     count     potions, ammo, lives: "<name> 4" each time it changes.
 //               low > 0 adds "low" at or below it.
+//   anchor: the corner or edge of the game's picture the zone keeps its
+//     distance from on a screen of another shape ('' guesses it from where
+//     the zone is); see screen-layout.js
+//   fit: what's always in the zone, to fit the profile to the game by:
+//     number | any (some text) | text (fitText); lineH: how tall its text is
+//
+// A profile is { id, name, display, apps, zones } and, for moving and fitting
+// its zones:
+//   layout     { width, height, aspect, scale }: the screen its zones are for
+//   landmarks  [{ id, text, rect, anchor, lineH }]: text that's always on the
+//              game's screen, found in a screenshot of it
+//   game       { id, name }: the ready-made game it was made from
+//   fittedAt   when it was last fitted to the game
+//
+// Games: ready-made profiles for popular games (screen/games/*.json, read by
+// screen-main.js) and anyone's profile shared as a file are "game files":
+// zones as made for one screen, moved onto this one when added. A game nobody
+// has made zones for can start from a screenshot: the text found in it is
+// made into suggested zones, then put right in the zone editor over the
+// screenshot.
 
 (() => {
   const desktop = window.chatReaderDesktop && window.chatReaderDesktop.screen;
   const host = Bot.host;
+  const L = window.ScreenLayout;
 
   const S = Bot.screen = {
     status: 'off',          // off | starting | watching | error
@@ -93,7 +114,9 @@
     voice: { engine: '', voiceId: '', rate: 1, pitch: 1, volume: 100 },
     interrupt: 'self', settle: 350, prefix: '', ignore: '', only: '', color: '',
     sayStart: false, readyText: '', low: 0, countFrom: 0,
+    anchor: '', fit: '', fitText: '', lineH: 0,
   };
+  const FIT_KINDS = new Set(['number', 'any', 'text']);
 
   const KEY_ACTIONS = [
     ['toggle', 'Zones on / off'],
@@ -110,6 +133,7 @@
     ['zoomOut', 'Lens zoom out'],
     ['profile', 'Next profile'],
     ['edit', 'Edit the zones on screen'],
+    ['fit', 'Fit the zones to the game'],
   ];
   S.KEY_ACTIONS = KEY_ACTIONS;
 
@@ -161,11 +185,27 @@
     zone.countFrom = clamp(Math.round(Number(zone.countFrom) || 0), 0, 60);
     zone.readyText = String(zone.readyText || '').slice(0, 80);
     zone.low = clamp(Math.round(Number(zone.low) || 0), 0, 9999);
+    if (!L.ANCHORS[zone.anchor]) zone.anchor = '';
+    if (!FIT_KINDS.has(zone.fit)) zone.fit = '';
+    zone.fitText = String(zone.fitText || '').slice(0, 60);
+    zone.lineH = clamp(Number(zone.lineH) || 0, 0, 0.5);
     delete zone.isNew;
     return zone;
   }
 
-  S.newProfile = (name = 'My zones') => ({ id: uid('p'), name, display: '', apps: [], zones: [] });
+  function normalizeLandmark(l) {
+    if (!l || typeof l !== 'object' || !String(l.text || '').trim()) return null;
+    return { id: l.id || uid('m'), text: String(l.text).trim().slice(0, 60), rect: fitRect(l.rect), anchor: L.ANCHORS[l.anchor] ? l.anchor : '', lineH: clamp(Number(l.lineH) || 0, 0, 0.5) };
+  }
+
+  function normalizeLayout(v) {
+    if (!v || typeof v !== 'object') return null;
+    const width = Math.round(Number(v.width)), height = Math.round(Number(v.height));
+    if (!(width >= 100 && height >= 100 && width <= 20000 && height <= 20000)) return null;
+    return { width, height, aspect: clamp(Number(v.aspect) || 0, 0, 5), scale: clamp(Number(v.scale) || 1, 0.2, 5) };
+  }
+
+  S.newProfile = (name = 'My zones') => ({ id: uid('p'), name, display: '', apps: [], zones: [], layout: null, landmarks: [], game: null, fittedAt: 0 });
 
   // -------------------------------------------------------------------------
   // A profile for each program
@@ -203,12 +243,16 @@
     const p = c.autoProfile ? S.profileForApp(app) : null;
     // A program without a profile leaves the one in use alone, so looking at
     // chat or Discord for a moment doesn't change anything.
-    if (!p || p.id === c.profile) { changed(); return; }
-    c.profile = p.id;
-    Bot.save();
-    S.apply({ keys: true });
-    Bot.log('info', `Screen reader: ${app.name || app.exe} came to the front, using the profile “${p.name}”.`);
-    navSay(`Profile ${p.name}, ${countZones()}.`);
+    if (!p) { changed(); return; }
+    if (p.id === c.profile) changed();
+    else {
+      c.profile = p.id;
+      Bot.save();
+      S.apply({ keys: true });
+      Bot.log('info', `Screen reader: ${app.name || app.exe} came to the front, using the profile “${p.name}”.`);
+      navSay(`Profile ${p.name}, ${countZones()}.`);
+    }
+    autoFit(p);
   }
 
   function normalize() {
@@ -224,12 +268,42 @@
         .filter((a) => a && !seen.has(appKey(a)) && seen.add(appKey(a)))
         .slice(0, 20);
       p.zones = (Array.isArray(p.zones) ? p.zones : []).slice(0, 50).map(normalizeZone);
+      p.layout = normalizeLayout(p.layout);
+      p.landmarks = (Array.isArray(p.landmarks) ? p.landmarks : []).map(normalizeLandmark).filter(Boolean).slice(0, 40);
+      p.game = p.game && p.game.id ? { id: String(p.game.id).slice(0, 60), name: String(p.game.name || '').slice(0, 60) } : null;
+      p.fittedAt = Number(p.fittedAt) || 0;
     }
     if (!c.profiles.some((p) => p.id === c.profile)) c.profile = c.profiles[0].id;
     for (const [name] of KEY_ACTIONS) if (!c.keys[name]) c.keys[name] = { code: '' };
   }
 
   S.profile = () => cfg().profiles.find((p) => p.id === cfg().profile) || cfg().profiles[0];
+
+  // The size of the screen a profile reads, in pixels.
+  function screenSize(p = S.profile()) {
+    const d = S.displays.find((x) => x.id === p.display) || S.displays.find((x) => x.primary) || S.displays[0];
+    return d && d.pixels ? { width: d.pixels.width, height: d.pixels.height } : null;
+  }
+  S.screenSize = screenSize;
+
+  // Zones (and landmarks) placed for one screen, moved for the screen the
+  // profile reads now. On one of the same shape nothing moves; on a wider or
+  // narrower one each zone keeps its distance from its corner or edge, as the
+  // game's HUD does. A profile without a size yet is for the screen it reads.
+  function syncLayout(p) {
+    const size = screenSize(p);
+    if (!size) return false;
+    if (!p.layout) { p.layout = { ...size, aspect: 0, scale: 1 }; return true; }
+    if (p.layout.width === size.width && p.layout.height === size.height) return false;
+    const from = p.layout;
+    const to = { ...from, ...size };
+    const move = (items) => items.map((it) => ({ ...it, rect: L.remap(it.rect, L.anchorFor(it, from), from, to) }));
+    p.zones = move(p.zones);
+    p.landmarks = move(p.landmarks);
+    p.layout = to;
+    Bot.log('info', `Screen reader: the zones of “${p.name}” were moved for a ${size.width}×${size.height} screen.`);
+    return true;
+  }
   S.zones = () => (S.profile() ? S.profile().zones : []);
   const autoZones = () => S.zones().filter((z) => z.enabled !== false && z.mode !== 'manual');
 
@@ -1445,6 +1519,11 @@
       case 'edit':
         S.editOnScreen({ hideMain: document.hasFocus() });
         break;
+      case 'fit':
+        if (!S.canFit()) { navSay(`${S.profile().name} has nothing to fit by. Profiles from a ready-made game or a screenshot do.`); break; }
+        navSay('Looking for the game’s HUD.');
+        try { navSay(S.fitSummary(await S.fitProfile())); } catch (err) { navSay(`Couldn’t fit the zones: ${err.message}`); }
+        break;
       default:
         break;
     }
@@ -1465,6 +1544,28 @@
     cooldown: 'Cooldown: say when ready', count: 'A number: potions, ammo', manual: 'Only when I ask',
   };
 
+  // The zones as they came back from the editor, which only moves, sizes,
+  // names and sets what each reads: the rest stays as it was.
+  function zonesFromEditor(edited, previous, layout) {
+    const before = new Map(previous.map((z) => [z.id, z]));
+    const zones = [];
+    edited.forEach((z, i) => {
+      const old = before.get(z.id);
+      const mode = MODES.some(([m]) => m === z.mode) ? z.mode : (old ? old.mode : 'changes');
+      // A zone that just became a number zone answers faster.
+      const numberDefaults = NUMBER_MODES.has(mode) && (!old || !NUMBER_MODES.has(old.mode)) ? { settle: mode === 'cooldown' ? 100 : 150 } : {};
+      if (old) {
+        // Moved to another part of the screen, it keeps its distance from
+        // the corner or edge it's near now.
+        const moved = old.anchor && layout && L.autoAnchor(z.rect, layout) !== L.autoAnchor(old.rect, layout);
+        zones.push(normalizeZone({ ...old, name: z.name, rect: z.rect, mode, ...numberDefaults, ...(moved ? { anchor: '' } : {}) }, i));
+      } else {
+        zones.push(normalizeZone({ id: z.id, name: z.name, rect: z.rect, color: z.color, mode, voice: S.voiceForNewZone(zones), ...numberDefaults }, i));
+      }
+    });
+    return zones;
+  }
+
   S.editing = false;
   S.editOnScreen = async ({ selected = '', hideMain = true } = {}) => {
     if (!desktop || S.editing) return null;
@@ -1476,17 +1577,8 @@
       if (!result || result.canceled || !Array.isArray(result.zones)) { navSay('Zones not changed.'); return null; }
       const profile = S.profile();
       const before = new Map(profile.zones.map((z) => [z.id, z]));
-      const zones = [];
-      result.zones.forEach((z, i) => {
-        // The editor only moves, sizes and names; the rest stays as it was.
-        const old = before.get(z.id);
-        const mode = MODES.some(([m]) => m === z.mode) ? z.mode : (old ? old.mode : 'changes');
-        // A zone that just became a number zone answers faster.
-        const numberDefaults = NUMBER_MODES.has(mode) && (!old || !NUMBER_MODES.has(old.mode)) ? { settle: mode === 'cooldown' ? 100 : 150 } : {};
-        if (old) zones.push(normalizeZone({ ...old, name: z.name, rect: z.rect, mode, ...numberDefaults }, i));
-        else zones.push(normalizeZone({ id: z.id, name: z.name, rect: z.rect, color: z.color, mode, voice: S.voiceForNewZone(zones), ...numberDefaults }, i));
-      });
-      profile.zones = zones;
+      profile.zones = zonesFromEditor(result.zones, profile.zones, profile.layout);
+      S.lastFit = null;
       for (const id of before.keys()) if (!profile.zones.some((z) => z.id === id)) zoneState.delete(id);
       for (const z of profile.zones) zoneState.delete(z.id);
       Bot.save();
@@ -1497,6 +1589,361 @@
       S.editing = false;
       changed();
     }
+  };
+
+  // -------------------------------------------------------------------------
+  // Games: ready-made zones, fitting them to the game, zones from a screenshot
+  // -------------------------------------------------------------------------
+
+  const GAME_FORMAT = 'chat-reader-game';
+  S.games = [];   // the ready-made games, checked
+
+  const slug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'game';
+
+  // A game file, checked: zones as they were made, for the screen (ref) they
+  // were made on. Null when it isn't one.
+  function normalizeGame(raw) {
+    if (!raw || typeof raw !== 'object' || raw.format !== GAME_FORMAT || !Array.isArray(raw.zones)) return null;
+    const ref = normalizeLayout(raw.ref);
+    const name = String(raw.name || '').trim().slice(0, 60);
+    if (!ref || !name) return null;
+    return {
+      id: slug(raw.id || name),
+      name,
+      apps: (Array.isArray(raw.apps) ? raw.apps : []).map((a) => String(a || '').trim().slice(0, 120)).filter(Boolean).slice(0, 20),
+      ref: { width: ref.width, height: ref.height, aspect: ref.aspect },
+      notes: String(raw.notes || '').slice(0, 1000),
+      // Voices are this computer's own; each zone gets one when it's added.
+      zones: raw.zones.slice(0, 50).map((z, i) => { const n = normalizeZone({ ...z, id: 'z', voice: undefined }, i); delete n.voice; delete n.id; return n; }),
+      landmarks: (Array.isArray(raw.landmarks) ? raw.landmarks : []).map(normalizeLandmark).filter(Boolean).slice(0, 40),
+    };
+  }
+
+  async function loadGames() {
+    if (!desktop || !desktop.games) return;
+    try {
+      S.games = (await desktop.games()).map(normalizeGame).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+    } catch (err) {
+      Bot.log('error', `Screen reader: couldn’t read the ready-made games (${err.message}).`);
+    }
+    changed();
+  }
+
+  // Programs belong to one profile each: added to this one, they leave the others.
+  function takeApps(p, apps) {
+    for (const a of apps) {
+      for (const other of cfg().profiles) if (other !== p) other.apps = other.apps.filter((x) => appKey(x) !== appKey(a));
+      if (!p.apps.some((x) => appKey(x) === appKey(a))) p.apps.push(a);
+    }
+  }
+
+  // A new profile from a game: its zones moved onto this screen, each with a
+  // voice of its own, and the game's programs.
+  S.addGame = (game) => {
+    const c = cfg();
+    const p = S.newProfile(game.name);
+    const size = screenSize(p) || { width: game.ref.width, height: game.ref.height };
+    p.layout = { ...size, aspect: game.ref.aspect, scale: 1 };
+    p.game = { id: game.id, name: game.name };
+    const zones = [];
+    game.zones.forEach((z, i) => {
+      const rect = L.remap(z.rect, L.anchorFor(z, game.ref), game.ref, p.layout);
+      zones.push(normalizeZone({ ...Bot.clone(z), id: uid('z'), rect, voice: S.voiceForNewZone(zones) }, i));
+    });
+    p.zones = zones;
+    p.landmarks = game.landmarks.map((l) => normalizeLandmark({ ...l, id: uid('m'), rect: L.remap(l.rect, L.anchorFor(l, game.ref), game.ref, p.layout) }));
+    takeApps(p, game.apps);
+    c.profiles.push(p);
+    c.profile = p.id;
+    Bot.save();
+    S.apply({ keys: true });
+    Bot.log('info', `Screen reader: added “${game.name}” with ${p.zones.length} zones.`);
+    return p;
+  };
+
+  // A profile as a game file: to share, or to add to the ready-made games.
+  const ZONE_KEYS = ['name', 'enabled', 'rect', 'anchor', 'mode', 'interrupt', 'settle', 'prefix', 'ignore', 'only', 'sayStart', 'readyText', 'low', 'countFrom', 'fit', 'fitText', 'lineH'];
+  const round4 = (v) => Math.round(v * 10000) / 10000;
+  const roundRect = (r) => ({ x: round4(r.x), y: round4(r.y), w: round4(r.w), h: round4(r.h) });
+  S.exportGame = (p = S.profile()) => {
+    syncLayout(p);
+    const layout = p.layout || { width: 1920, height: 1080, aspect: 0 };
+    return {
+      format: GAME_FORMAT,
+      version: 1,
+      id: p.game ? p.game.id : slug(p.name),
+      name: p.name,
+      apps: [...p.apps],
+      ref: { width: layout.width, height: layout.height, aspect: round4(layout.aspect || 0) },
+      notes: '',
+      zones: p.zones.map((z) => {
+        const out = {};
+        for (const k of ZONE_KEYS) {
+          const v = z[k];
+          // Only what differs from a new zone, to keep the file readable.
+          if (k !== 'name' && k !== 'rect' && k !== 'mode' && JSON.stringify(v) === JSON.stringify(ZONE_DEFAULTS[k])) continue;
+          out[k] = k === 'rect' ? roundRect(v) : k === 'lineH' ? round4(v) : v;
+        }
+        return out;
+      }),
+      landmarks: p.landmarks.map((l) => ({ text: l.text, rect: roundRect(l.rect), anchor: l.anchor, lineH: round4(l.lineH) })),
+    };
+  };
+
+  S.importGame = (text) => {
+    let raw;
+    try { raw = JSON.parse(text); } catch { throw new Error('That file isn’t a game file: it isn’t JSON.'); }
+    const game = normalizeGame(raw);
+    if (!game) throw new Error('That file isn’t a Chat Reader game file.');
+    return S.addGame(game);
+  };
+
+  // --- Pictures ---------------------------------------------------------
+
+  // A still of the screen the profile reads.
+  S.grabPicture = async () => {
+    if (!(await ensureCapture()) || !cap.frame) throw new Error(S.problem || 'The screen can’t be captured');
+    try { return await createImageBitmap(cap.frame); } finally { releaseCaptureLater(); }
+  };
+
+  S.loadPicture = async (blob) => {
+    try { return await createImageBitmap(blob); } catch { throw new Error('That isn’t a picture this can read. PNG and JPEG screenshots work.'); }
+  };
+
+  const canPaddle = () => !paddle.failed && !!(desktop && desktop.paddleFiles);
+
+  // Every line of text in a whole picture, read as if the game's picture were
+  // 1080 pixels tall: text recognition finds the boxes round text a little
+  // taller or shorter at other sizes, and fitting goes by how tall text is.
+  async function readWhole(picture, layout) {
+    if (canPaddle()) {
+      const ch = L.content(layout).h;
+      const maxSide = clamp(Math.round((Math.max(picture.width, picture.height) * 1080) / ch), 640, 4096);
+      try {
+        // A lone digit is read right with low confidence, so it isn't
+        // dropped with the rest of what's unsure.
+        const lines = await readPaddlePicture({ canvas: picture, toScreen: (b) => b }, { options: { maxSide }, digits: true });
+        return lines.filter((l) => (L.isNumberText(l.text)
+          ? l.conf >= 0.4
+          : l.conf >= 0.6 && (l.text.replace(/[^\p{L}\p{N}]/gu, '').length > 2 || l.conf >= 0.85)));
+      } catch (err) {
+        if (!paddle.failed) throw err;
+      }
+    }
+    return (await recognize(picture, { x: 0, y: 0, w: 1, h: 1 }, { full: true })).lines;
+  }
+
+  // The text in a whole picture, as fitting and suggesting see it.
+  S.readPicture = (picture, aspect = 0) => readWhole(picture, { width: picture.width, height: picture.height, aspect });
+
+  // A game drawn at a fixed shape on a screen of another (16:9 on an
+  // ultrawide) has black bars at its sides, or above and below: the shape of
+  // the picture between them, or 0 when there are none.
+  function pictureAspect(picture) {
+    const w = 320, h = Math.max(1, Math.round((320 * picture.height) / picture.width));
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(picture, 0, 0, w, h);
+    const d = ctx.getImageData(0, 0, w, h).data;
+    const dark = (x, y) => { const i = (y * w + x) * 4; return d[i] < 18 && d[i + 1] < 18 && d[i + 2] < 18; };
+    const col = (x) => { for (let y = 0; y < h; y++) if (!dark(x, y)) return false; return true; };
+    const row = (y) => { for (let x = 0; x < w; x++) if (!dark(x, y)) return false; return true; };
+    let l = 0, r = 0, t = 0, b = 0;
+    while (l < w / 3 && col(l)) l++;
+    while (r < w / 3 && col(w - 1 - r)) r++;
+    while (t < h / 3 && row(t)) t++;
+    while (b < h / 3 && row(h - 1 - b)) b++;
+    const sides = l >= w * 0.03 && Math.abs(l - r) <= 2;
+    const ends = t >= h * 0.03 && Math.abs(t - b) <= 2;
+    // Neither, or a black screen.
+    if (sides === ends) return 0;
+    const a = sides ? (w - l - r) / h : w / (h - t - b);
+    for (const k of [16 / 9, 16 / 10, 4 / 3, 21 / 9, 32 / 9]) if (Math.abs(a - k) / k < 0.02) return round4(k);
+    return round4(a);
+  }
+
+  // A picture small enough to send to the zone editor.
+  async function pictureUrl(picture) {
+    const s = Math.min(1, 2560 / picture.width);
+    const canvas = new OffscreenCanvas(Math.round(picture.width * s), Math.round(picture.height * s));
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(picture, 0, 0, canvas.width, canvas.height);
+    const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // --- Fitting ----------------------------------------------------------
+
+  // What a profile can be fitted by: zones its game says are always there,
+  // and its landmarks.
+  const fitPoints = (p) => [
+    ...p.zones.filter((z) => z.fit).map((z) => ({ id: z.id, kind: z.fit, text: z.fitText, lineH: z.lineH, rect: z.rect, anchor: z.anchor })),
+    ...p.landmarks.map((l) => ({ id: l.id, kind: 'text', text: l.text, lineH: l.lineH, rect: l.rect, anchor: l.anchor, landmark: true })),
+  ];
+  S.canFit = (p = S.profile()) => fitPoints(p).length > 0;
+
+  // Fits a profile's zones to a picture of its game: a screenshot, or the
+  // screen as it is now. Finds the game's HUD size, where each corner of the
+  // HUD is, and moves each number zone onto its number (screen-layout.js).
+  // Nothing changes when the game isn't found. strict: fitting by itself,
+  // which needs more to go on than someone who asked for it.
+  S.fitProfile = async ({ picture = null, p = S.profile(), strict = false } = {}) => {
+    const points = fitPoints(p);
+    if (!points.length) return { error: `${p.name} has nothing to fit by. Profiles from a ready-made game or from a screenshot do.` };
+    syncLayout(p);
+    const pic = picture || await S.grabPicture();
+    const picLayout = { width: pic.width, height: pic.height, aspect: p.layout.aspect };
+    const pts = points.map((pt) => {
+      const anchor = L.anchorFor(pt, p.layout);
+      return { ...pt, anchor, rect: L.remap(pt.rect, anchor, p.layout, picLayout) };
+    });
+    const lines = await readWhole(pic, picLayout);
+    const result = L.fit(pts, lines, picLayout);
+    if (!result || (strict && !(result.found >= 2 && result.scale >= 0.6 && result.scale <= 1.7))) {
+      return { found: result ? result.found : 0, total: pts.length, lines: lines.length };
+    }
+    // A lone small number is often missed when the whole picture is read:
+    // each number not found is read the way its zone is when watched, where
+    // the zone should now be; then, if it isn't there, from a little around it.
+    const found = new Set(result.matches.map((m) => m.id));
+    for (const pt of pts) {
+      if (pt.kind !== 'number' || found.has(pt.id)) continue;
+      const where = L.applyFit([pt], picLayout, { ...result, shifts: {} })[0].rect;
+      const cx = where.x + where.w / 2, cy = where.y + where.h / 2;
+      let hit = null;
+      for (const grow of [1, 1.8]) {
+        const look = L.fitRect({ x: cx - (where.w * grow) / 2, y: cy - (where.h * grow) / 2, w: where.w * grow, h: where.h * grow });
+        let near;
+        try { near = (await recognize(pic, look, { digits: true })).lines; } catch { break; }
+        hit = near.filter((l) => L.isNumberText(l.text) && Math.abs(l.box.x + l.box.w / 2 - cx) < where.w && Math.abs(l.box.y + l.box.h / 2 - cy) < where.h)
+          .sort((a, b) => Math.hypot(a.box.x + a.box.w / 2 - cx, a.box.y + a.box.h / 2 - cy) - Math.hypot(b.box.x + b.box.w / 2 - cx, b.box.y + b.box.h / 2 - cy))[0];
+        if (hit) break;
+      }
+      if (!hit) continue;
+      result.shifts[pt.id] = L.holdShift(where, hit.box, picLayout);
+      result.matches.push({ id: pt.id, kind: 'number', text: hit.text });
+      result.found++;
+    }
+    S.lastFit = { id: p.id, zones: Bot.clone(p.zones), landmarks: Bot.clone(p.landmarks), layout: Bot.clone(p.layout), fittedAt: p.fittedAt };
+    p.zones = L.applyFit(p.zones, p.layout, result).map(normalizeZone);
+    p.landmarks = L.applyFit(p.landmarks, p.layout, result).map(normalizeLandmark).filter(Boolean);
+    p.layout.scale = clamp(p.layout.scale * result.scale, 0.2, 5);
+    p.fittedAt = Date.now();
+    for (const z of p.zones) zoneState.delete(z.id);
+    Bot.save();
+    S.apply();
+    Bot.log('info', `Screen reader: fitted “${p.name}” to the game: found ${result.found} of ${result.total}, HUD size ${Math.round(p.layout.scale * 100)}%.`);
+    return { ...result, lines: lines.length, hud: p.layout.scale };
+  };
+
+  S.fitSummary = (r, p = S.profile()) => {
+    if (r.error) return r.error;
+    if (!r.hud) {
+      return r.lines
+        ? `Couldn’t find ${p.name}’s HUD in the picture. Nothing was moved. Try again with the game showing its HUD.`
+        : 'No text was found in the picture. Nothing was moved. Try again with the game showing its HUD.';
+    }
+    return `Fitted ${p.name}: found ${r.found} of ${r.total} things it looks for. HUD size ${Math.round(r.hud * 100)} percent.`;
+  };
+
+  S.lastFit = null;
+  S.undoFit = () => {
+    const b = S.lastFit;
+    const p = b && cfg().profiles.find((x) => x.id === b.id);
+    if (!p) return false;
+    Object.assign(p, { zones: b.zones, landmarks: b.landmarks, layout: b.layout, fittedAt: b.fittedAt });
+    S.lastFit = null;
+    for (const z of p.zones) zoneState.delete(z.id);
+    Bot.save();
+    S.apply();
+    return true;
+  };
+
+  // The HUD size by hand, for when fitting can't find the game: each zone
+  // grows or shrinks around its corner or edge.
+  S.scaleProfile = (factor, p = S.profile()) => {
+    syncLayout(p);
+    const result = { scale: factor, offsets: {}, shifts: {} };
+    p.zones = L.applyFit(p.zones, p.layout, result).map(normalizeZone);
+    p.landmarks = L.applyFit(p.landmarks, p.layout, result).map(normalizeLandmark).filter(Boolean);
+    p.layout.scale = clamp(p.layout.scale * factor, 0.2, 5);
+    S.lastFit = null;
+    for (const z of p.zones) zoneState.delete(z.id);
+    Bot.save();
+    S.apply();
+  };
+
+  // The first time a game's profile comes up by itself, its zones are fitted
+  // to the game a few seconds in (once its HUD is likely up). Tried a few
+  // times, once a run of the app.
+  const autoFitTried = new Set();
+  function autoFit(p) {
+    // Only with the reader on: it looks at the screen and says what it did.
+    if (!cfg().enabled || !cfg().autoFit || p.fittedAt || !S.canFit(p) || autoFitTried.has(p.id)) return;
+    autoFitTried.add(p.id);
+    (async () => {
+      for (const wait of [8000, 15000, 30000]) {
+        await Bot.wait(wait);
+        // The game has to still be in front, with its profile in use.
+        if (S.profile() !== p || !S.app || !p.apps.some((a) => S.appMatches(a, S.app)) || S.editing) continue;
+        try {
+          const r = await S.fitProfile({ p, strict: true });
+          if (r.hud) { navSay(`Zones fitted to ${p.name}. HUD size ${Math.round(r.hud * 100)} percent.`); return; }
+        } catch (err) {
+          Bot.log('error', `Screen reader: fitting “${p.name}” by itself: ${err.message}`);
+          return;
+        }
+      }
+    })();
+  }
+
+  // --- Zones from a screenshot --------------------------------------------
+
+  // Zones for a game nobody has made zones for: the text in a screenshot of
+  // it made into suggestions (screen-layout.js), then the zone editor over
+  // the screenshot to put them right. Saved as a new profile, with the
+  // screenshot's labels kept as landmarks to fit it by later.
+  S.zonesFromPicture = async (picture, { name = '', apps = [] } = {}) => {
+    if (!desktop || S.editing) return { canceled: true };
+    const layout = { width: picture.width, height: picture.height, aspect: pictureAspect(picture), scale: 1 };
+    const lines = await readWhole(picture, layout);
+    const { zones: suggested, landmarks } = L.suggest(lines, layout);
+    const suggestions = suggested.map((z) => ({ ...z, id: uid('z') }));
+    const url = await pictureUrl(picture);
+    S.editing = true;
+    changed();
+    let result;
+    try {
+      const modes = MODES.map(([m]) => [m, EDITOR_MODE_LABELS[m] || m]);
+      result = await desktop.editZones({ display: S.profile().display, zones: suggestions, modes, hideMain: true, picture: { url, width: picture.width, height: picture.height } });
+    } finally {
+      S.editing = false;
+      changed();
+    }
+    if (!result || result.canceled || !Array.isArray(result.zones)) return { canceled: true, lines: lines.length, suggested: suggestions.length };
+    const c = cfg();
+    const p = S.newProfile(String(name || 'New game').trim().slice(0, 60) || 'New game');
+    p.layout = layout;
+    // Suggestions the editor kept still know what they were made from.
+    const fresh = suggestions.map((z) => normalizeZone({ ...z, voice: undefined }));
+    p.zones = zonesFromEditor(result.zones, fresh, layout);
+    p.zones.forEach((z, i) => { if (fresh.some((f) => f.id === z.id)) z.voice = S.voiceForNewZone(p.zones.slice(0, i)); });
+    p.landmarks = landmarks.map((l) => normalizeLandmark({ ...l, id: uid('m') }));
+    p.fittedAt = Date.now();
+    takeApps(p, apps);
+    c.profiles.push(p);
+    c.profile = p.id;
+    syncLayout(p);
+    Bot.save();
+    S.apply({ keys: true });
+    navSay(`Saved ${p.name}, ${countZones()}.`);
+    return { profile: p, lines: lines.length, suggested: suggestions.length };
   };
 
   // -------------------------------------------------------------------------
@@ -1576,6 +2023,9 @@
   S.apply = ({ keys = false } = {}) => {
     if (!desktop) return;
     normalize();
+    let moved = false;
+    for (const p of cfg().profiles) moved = syncLayout(p) || moved;
+    if (moved) Bot.save();
     for (const id of [...zoneState.keys()]) if (!S.zones().some((z) => z.id === id)) zoneState.delete(id);
     if (cap.track && cap.display !== S.profile().display) stopCapture();
     pushMarkers();
@@ -1593,13 +2043,14 @@
     normalize();
     desktop.onEvent(({ type, payload }) => {
       if (type === 'say') navSay(payload);
-      if (type === 'displays') { S.displays = payload || []; S.map = null; changed(); }
+      if (type === 'displays') { S.displays = payload || []; S.map = null; S.apply(); }
       if (type === 'app' && payload) onApp(payload);
       if (type === 'app-error') Bot.log('error', `Screen reader: ${payload}`);
     });
     try { S.displays = await desktop.displays(); } catch { S.displays = []; }
     await refreshAccess();
     S.apply();
+    loadGames();
     // Loads the recognition model now, so the first hotkey isn't the slow one.
     setTimeout(() => { S.selfTest().catch(() => {}); }, 3000);
     Bot.on('reset', () => { zoneState.clear(); S.map = null; S.apply({ keys: true }); });

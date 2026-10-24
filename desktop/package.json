@@ -17,7 +17,8 @@
     "dist": "npm run sync-web && npm run fetch-ocr && electron-builder",
     "dist:mac": "npm run sync-web && npm run fetch-ocr && electron-builder --mac",
     "dist:win": "npm run sync-web && npm run fetch-ocr && electron-builder --win",
-    "fetch-ocr": "node scripts/fetch-ocr.js"
+    "fetch-ocr": "node scripts/fetch-ocr.js",
+    "check-games": "node scripts/check-games.js"
   },
   "devDependencies": {
     "electron": "^44.7.2",

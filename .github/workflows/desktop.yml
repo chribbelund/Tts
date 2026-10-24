@@ -65,6 +65,10 @@ jobs:
         working-directory: desktop
         run: npm run sync-web
 
+      - name: Check the screen reader's ready-made games
+        working-directory: desktop
+        run: npm run check-games
+
       - name: Fetch the text recognition models
         working-directory: desktop
         run: npm run fetch-ocr

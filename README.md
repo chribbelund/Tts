@@ -162,7 +162,7 @@ rather than by which half of the app they belong to:
 | App | Accounts, Shortcuts & API (the reader's keys and the bot's hotkeys), Display, Backup & import |
 
 Long sections are split into tabs along the top of the page, so each part fits on the
-screen instead of being one long scroll: the Screen reader has Overview, Zones, Profiles,
+screen instead of being one long scroll: the Screen reader has Overview, Games, Zones, Profiles,
 Reading cursor, Lens, Hotkeys and Speech & timing, for example. Left and right arrows move
 between the tabs, and the app remembers the one you used last on each page.
 
@@ -373,6 +373,71 @@ arrows to resize, `Tab` to the next one, `W` says where it is, `Enter` saves. Th
 editor's *Reads* list sets what each box reads (text, a cooldown, a number…). Or
 start from a template (subtitles, dialogue choices, objective…), or type in where a
 zone goes. `Ctrl+Alt+1`…`9` read zone 1…9 on request. Every key can be changed.
+
+### Games: ready-made zones, fitted to your screen
+
+People play at different resolutions, on wider or narrower screens, with the game's
+HUD size or UI scale set differently, so zones in fixed places would land in the
+wrong spot for most of them. *Screen reader → Games* deals with that in three ways:
+
+- **Ready-made games.** Elden Ring, Dark Souls III, League of Legends, World of
+  Warcraft and Cyberpunk 2077 come with zones (subtitles, prompts, chat,
+  objectives, flask and rune counts, ability cooldowns…). Adding one makes a
+  profile with the game's program, so it's used by itself when the game comes up.
+  Elden Ring's and League of Legends' zones were measured on screenshots of the
+  game; the others are placed from their default HUD and are a starting point to
+  check (each says so).
+- **Fit to the game.** In the game, `Ctrl+Alt+F` (or *Fit in 5 seconds*, or a
+  screenshot) finds the HUD and moves the zones to match. Text recognition finds
+  every line of text on screen; the zones and labels the game says are always
+  there are looked for among them, at every HUD size from 50% to 200%. The size
+  where they line up best (by where they are, and how tall their text is) wins,
+  then each number zone is moved onto its number. A screen full of other text (a
+  web page) is caught by running the same search with the text moved away: the
+  real HUD has to do clearly better than that, or nothing moves. The first time
+  a game's profile comes up, this happens by itself. *Undo the fit*, and
+  *Smaller*/*Bigger* by hand, are there too.
+- **A game that isn't here.** Choose, paste (`Ctrl+V`) or drop a screenshot of
+  the game with its HUD showing, or take one in 5 seconds. The text in it is
+  turned into suggested zones by where it is and what it looks like (subtitles
+  across the bottom, chat low on the left, objectives top right, menus, numbers
+  named after the label next to them), and the zone editor opens over the
+  screenshot to put them right. Saving makes a new profile; the screenshot's
+  labels are kept so the profile can be fitted later.
+
+Zones keep their distance from the corner or edge they're near, in units of the
+screen's height, the way games lay out a HUD. So a profile moved to an ultrawide
+keeps the minimap zone in the corner at the same size, and a game that only draws
+in 16:9 (Elden Ring, Dark Souls III) keeps its zones inside the picture, between
+the black bars. Everything stays ordinary zones in an ordinary profile: draw,
+move and edit them as before.
+
+Any profile can be saved as a game file and added on another computer (*Share a
+game*). To add a ready-made game to Chat Reader, put its game file in
+`desktop/screen/games/` and run `npm run check-games` in `desktop/`. The format:
+
+```json
+{
+  "format": "chat-reader-game", "version": 1,
+  "id": "elden-ring", "name": "Elden Ring", "apps": ["eldenring.exe"],
+  "ref": { "width": 1920, "height": 1080, "aspect": 1.7778 },
+  "notes": "Shown under the game's name.",
+  "zones": [
+    { "name": "Flask", "rect": { "x": 0.1, "y": 0.882, "w": 0.03, "h": 0.044 },
+      "anchor": "bl", "mode": "count", "low": 1, "fit": "number" }
+  ],
+  "landmarks": [{ "text": "General", "rect": { "x": 0.016, "y": 0.655, "w": 0.031, "h": 0.018 }, "anchor": "bl", "lineH": 0.018 }]
+}
+```
+
+`ref` is the screen the zones were placed on (`aspect` 0, or the shape a game
+only draws at); `rect` is fractions of it. `anchor` is the corner or edge a zone
+keeps its distance from (`tl t tr l c r bl b br`, left out to go by where the zone
+is). `fit` marks what's always in a zone, to fit by: `number`, `any` text, or
+`text` with `fitText`; `lineH` is how tall its text is, as a fraction of the
+screen's height. `landmarks` are labels that are always on screen. Any other zone
+setting (`settle`, `interrupt`, `prefix`, `only`, `ignore`, `low`, `countFrom`,
+`readyText`, `sayStart`, `enabled`) works as in the app.
 
 - Text is recognised on your computer; nothing is sent anywhere. On Windows,
   zones are read by PaddleOCR (PP-OCRv5), built into the app: on game text it
@@ -643,6 +708,6 @@ For system voices, Microsoft Edge offers the most natural free options, the "…
 - `desktop/import-main.js`: reading Firebot and Mix It Up data (JSON, NeDB, SQLite, zip backups) for the importer
 - `desktop/bot/`: the bot itself, loaded into the page by the desktop app only — Twitch login and API (`twitch.js`), EventSub (`eventsub.js`), `$variables` (`variables.js`), effects (`effects.js`), commands, events and timers (`triggers.js`), viewers, points, games and moderation (`community.js`), OBS (`obs.js`), the multistream relay (`relay.js`), importing from other bots (`importers.js`), the controls and tabs (`ui.js`, `ui-tabs.js`, `ui-multistream.js`), the Dashboard's side column (`dashboard.js`), where the reader and the bot meet (`integrations.js`) and the window's sections (`shell.js`)
 - `desktop/overlay/`: the OBS overlay page
-- `desktop/screen-main.js`, `desktop/screen/`: the screen reader's main-process side — screen capture without a picker, the text recognition helpers (`ocr-mac.js` for Apple Vision, `ocr-win.ps1` for Windows OCR; `paddle-ocr.js` and `ocr-worker.js` run PaddleOCR in a worker, with models that `scripts/fetch-ocr.js` downloads into `screen/models/`), the helpers that notice which program is in front (`apps-mac.js`, `apps-win.ps1`), and the windows over the game: the zone editor and outlines (`overlay.*`) and the lens (`lens.*`); `desktop/bot/screen.js` and `ui-screen.js` are its page side
+- `desktop/screen-main.js`, `desktop/screen/`: the screen reader's main-process side — screen capture without a picker, the text recognition helpers (`ocr-mac.js` for Apple Vision, `ocr-win.ps1` for Windows OCR; `paddle-ocr.js` and `ocr-worker.js` run PaddleOCR in a worker, with models that `scripts/fetch-ocr.js` downloads into `screen/models/`), the helpers that notice which program is in front (`apps-mac.js`, `apps-win.ps1`), and the windows over the game: the zone editor and outlines (`overlay.*`) and the lens (`lens.*`); `desktop/bot/screen.js` and `ui-screen.js` are its page side, and `desktop/bot/screen-layout.js` moves zones between screens, fits them to a game and suggests them from a screenshot (no screen or OCR in it, so it runs in Node too). The ready-made games are `desktop/screen/games/*.json`, checked by `npm run check-games`
 - `docs/bot-plan.md`: how the bot is put together, and why
 - `.github/workflows/desktop.yml`: builds the desktop binaries and publishes them on a `v*` tag

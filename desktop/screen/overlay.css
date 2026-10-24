@@ -17,8 +17,11 @@ html, body {
 }
 
 body.editor { background: rgba(0, 0, 0, 0.18); cursor: crosshair; }
+/* Editing over a screenshot: the screenshot fills the stage, black round it. */
+body.editor.picture { background: #000; }
 
 .stage { position: fixed; inset: 0; }
+.stage-picture { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
 .sr-only {
   position: absolute; width: 1px; height: 1px; overflow: hidden;

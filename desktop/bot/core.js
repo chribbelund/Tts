@@ -112,7 +112,7 @@ const BOT_DEFAULTS = {
   screen: {
     enabled: false,          // watch the zones of the profile in use
     profile: '',             // id of the profile in use
-    profiles: [],            // [{ id, name, display, apps: ['game.exe'], zones: [zone] }], see screen.js for a zone
+    profiles: [],            // [{ id, name, display, apps: ['game.exe'], zones: [zone], layout, landmarks, game }], see screen.js
     autoProfile: true,       // use a profile by itself when one of its programs is in front
     pauseChat: true,         // chat waits while screen text is read
     showZones: false,        // outlines of the zones on screen
@@ -122,6 +122,7 @@ const BOT_DEFAULTS = {
     ocrEngine: 'auto',       // auto | paddle | system: which text recognition (screen.js)
     fastOcr: false,          // quicker, less accurate system text recognition
     numberKeys: true,        // Ctrl+Alt+1…9 read zone 1…9
+    autoFit: true,           // fit a game's zones to it the first time it comes up (screen.js)
     nav: { voice: { engine: '', voiceId: '', rate: 1.1, pitch: 1, volume: 100 }, wrap: false },
     lens: { enabled: false, follow: 'focus', zone: '', zoom: 3, width: 760, height: 280, position: 'top-right', display: '', filter: 'none', caption: true, captionSize: 30 },
     // A cleared key is { code: '' }, so it isn't put back by the defaults.
@@ -140,6 +141,7 @@ const BOT_DEFAULTS = {
       zoomOut: { code: 'Minus', ctrl: true, alt: true, shift: false, meta: false },
       profile: { code: 'KeyP', ctrl: true, alt: true, shift: false, meta: false },
       edit: { code: 'KeyE', ctrl: true, alt: true, shift: false, meta: false },
+      fit: { code: 'KeyF', ctrl: true, alt: true, shift: false, meta: false },
     },
   },
   // Multistream: the three chats joined up (relay.js).

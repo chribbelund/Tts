@@ -1,0 +1,19 @@
+{
+  "format": "chat-reader-game",
+  "version": 1,
+  "id": "dark-souls-3",
+  "name": "Dark Souls III",
+  "apps": ["DarkSoulsIII.exe"],
+  "ref": { "width": 1920, "height": 1080, "aspect": 1.7778 },
+  "notes": "Laid out like Elden Ring's HUD, which grew out of this one; not measured on Dark Souls III itself yet, so check the boxes with Fit or Draw zones on screen. The game only draws in 16:9.",
+  "zones": [
+    { "name": "Subtitles", "rect": { "x": 0.2, "y": 0.872, "w": 0.6, "h": 0.1 }, "anchor": "b", "mode": "changes", "settle": 300, "interrupt": "self" },
+    { "name": "Prompt", "rect": { "x": 0.28, "y": 0.8, "w": 0.44, "h": 0.07 }, "anchor": "b", "mode": "changes", "settle": 200, "interrupt": "self", "fit": "any", "lineH": 0.028 },
+    { "name": "Boss", "rect": { "x": 0.2, "y": 0.76, "w": 0.32, "h": 0.045 }, "anchor": "b", "mode": "changes", "settle": 400, "interrupt": "none", "prefix": "Boss" },
+    { "name": "Banners", "rect": { "x": 0.15, "y": 0.36, "w": 0.7, "h": 0.24 }, "anchor": "c", "mode": "changes", "settle": 500, "interrupt": "all" },
+    { "name": "Estus", "rect": { "x": 0.1, "y": 0.882, "w": 0.03, "h": 0.044 }, "anchor": "bl", "mode": "count", "settle": 150, "interrupt": "self", "low": 1, "fit": "number" },
+    { "name": "Quick item", "rect": { "x": 0.05, "y": 0.935, "w": 0.18, "h": 0.05 }, "anchor": "bl", "mode": "changes", "settle": 300, "interrupt": "self", "fit": "any", "lineH": 0.028 },
+    { "name": "Souls", "rect": { "x": 0.88, "y": 0.935, "w": 0.095, "h": 0.048 }, "anchor": "br", "mode": "manual", "settle": 150, "interrupt": "self", "fit": "number" }
+  ],
+  "landmarks": []
+}

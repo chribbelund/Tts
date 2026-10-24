@@ -404,4 +404,8 @@ p.code-box { display: block; }
 .sr-apps li { display: inline-flex; align-items: center; gap: 0.3em; padding: 0.15em 0.2em 0.15em 0.6em; border: 1px solid var(--border, rgba(127, 127, 127, 0.35)); border-radius: 999px; }
 .sr-neural { display: flex; flex-direction: column; gap: 6px; margin: 0.3em 0 0.6em; font-size: 13px; }
 .sr-neural-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sr-game-notes { display: block; margin-top: 2px; max-width: 60ch; font-size: 12px; }
+.sr-game-status:empty, .sr-game-status p:empty { display: none; }
+.sr-drop { margin: 0.6em 0; padding: 18px; border: 2px dashed var(--border, rgba(127, 127, 127, 0.45)); border-radius: 10px; text-align: center; font-size: 13px; color: var(--muted); }
+.sr-drop:focus-visible, .sr-drop.over { border-color: var(--accent); color: var(--text, inherit); outline: none; }
 .sr-neural progress { width: 100%; max-width: 360px; accent-color: var(--accent); }

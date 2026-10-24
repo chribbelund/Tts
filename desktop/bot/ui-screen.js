@@ -169,9 +169,8 @@
 
   const REGEX_SITE = 'https://regex101.com/';
 
-  // Ready-made rules. `ask` asks for the word instead.
+  // Ready-made rules.
   const ONLY_SUGGESTIONS = [
-    { label: 'My name, or another word (asks which)', ask: true },
     { label: 'Whispers to me (WoW: “[Name] whispers: …”)', rule: '/whispers:/i' },
     { label: 'Party and raid chat (WoW)', rule: '/^\\[(party|party leader|raid|raid leader|raid warning)\\]/i' },
     { label: 'Guild chat (WoW)', rule: '/^\\[(guild|officer)\\]/i' },
@@ -200,13 +199,14 @@
       label: 'Add a suggestion',
       onChange: (v) => {
         if (v === '') return;
-        const pick = ONLY_SUGGESTIONS[Number(v)];
-        if (!pick.ask) { add(pick.rule); return; }
-        const word = prompt('Which word? Lines with it are read, in any case. Your name, for example:', '');
-        if (word && word.trim()) add(word.trim().slice(0, 100));
-        else rebuild();
+        add(ONLY_SUGGESTIONS[Number(v)].rule);
       },
     });
+    // A word of your own, like your name: lines with it are read, in any case.
+    const word = { v: '' };
+    const addWord = () => { if (word.v.trim()) add(word.v.trim().slice(0, 100)); };
+    const wordInput = UI.text(word, 'v', { placeholder: 'e.g. your name', maxlength: 100 });
+    wordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addWord(); } });
     const sampleInput = UI.text(sample, 'v', { placeholder: 'e.g. [Guild] [Thrall]: hi Chris, need a heal?', onChange: check });
     sampleInput.setAttribute('aria-label', 'A line to try the rules on');
     check();
@@ -220,7 +220,27 @@
         ' is a good place to build and try one (pick the ECMAScript/JavaScript flavour). ',
         'In a chat box each line is checked on its own, so the second line of a long message that wraps is read only if it matches too.'),
       bad,
+      UI.row(UI.field('Add a word, like your name', wordInput), UI.button('Add', addWord)),
       UI.row(suggest, UI.field('Try a line', sampleInput), tryOut));
+  }
+
+  // A name typed in a small dialog: the app has no prompt(). Resolves with
+  // the text, or null when closed without saving.
+  function askText({ title, label, value = '', placeholder = '', saveLabel = 'OK', maxlength = 60 }) {
+    return new Promise((resolve) => {
+      let done = false;
+      UI.edit({
+        title,
+        item: { v: value },
+        saveLabel,
+        build: (it) => {
+          const input = UI.text(it, 'v', { placeholder, maxlength });
+          return [UI.field(label, input)];
+        },
+        onSave: (it) => { done = true; resolve(String(it.v || '').trim()); },
+        onClose: () => { if (!done) resolve(null); },
+      });
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -353,6 +373,7 @@
           go('zones', zones.length ? 'Change the zones' : 'Add a zone'))),
       UI.section('More',
         h('ul', { class: 'sr-overview' },
+          h('li', {}, go('games', 'Games'), ': ready-made zones for popular games, fitted to your screen, or zones made from a screenshot.'),
           h('li', {}, go('cursor', 'Reading cursor'), ': read the screen line by line with hotkeys.'),
           h('li', {}, go('lens', 'Lens'), `: a magnifier that follows what’s read. ${c().lens.enabled ? 'On.' : 'Off.'}`),
           h('li', {}, go('keys', 'Hotkeys'), ': the keys for all of it, working while a game is focused.'),
@@ -467,8 +488,8 @@
       UI.row(
         UI.field('Profile in use', UI.select(cfg, 'profile', cfg.profiles.map((x) => [x.id, `${x.name} (${x.zones.length})`]), { onChange: () => { save(); S.apply({ keys: true }); } })),
         displays,
-        UI.button('New', () => {
-          const name = prompt('Name of the new profile, e.g. the game it’s for:', '');
+        UI.button('New', async () => {
+          const name = await askText({ title: 'New profile', label: 'Name, e.g. the game it’s for', saveLabel: 'Make it' });
           if (!name) return;
           const np = S.newProfile(name.trim().slice(0, 60));
           cfg.profiles.push(np);
@@ -476,8 +497,8 @@
           save();
           S.apply({ keys: true });
         }),
-        UI.button('Rename', () => {
-          const name = prompt('New name:', p.name);
+        UI.button('Rename', async () => {
+          const name = await askText({ title: 'Rename the profile', label: 'Name', value: p.name, saveLabel: 'Rename' });
           if (!name) return;
           p.name = name.trim().slice(0, 60);
           save();
@@ -524,6 +545,7 @@
     });
     return UI.section('Reading zones',
       UI.lead('Boxes on the screen whose text is read out loud, each in its own voice. Draw them over the game, start from a template, or type in where they go. Each profile has its own zones.'),
+      h('p', { class: 'hint' }, 'For a popular game, or to start from a screenshot, see ', UI.button('Games', () => Bot.shell.show('screen/games'), { cls: 'link' }), '.'),
       profilePicker(),
       UI.row(
         UI.button(S.editing ? 'Drawing…' : 'Draw zones on screen', () => S.editOnScreen({ hideMain: true }), { cls: 'btn small primary', disabled: S.editing }),
@@ -653,11 +675,231 @@
           h('li', {}, 'The lens, the outlines and the zone editor are hidden from screen capture, so they’re never read or streamed.'))));
   }
 
+  // -------------------------------------------------------------------------
+  // Games: ready-made zones, fitting them to the game, zones from a screenshot
+  // -------------------------------------------------------------------------
+
+  // What was done last on the Games page, kept across redraws. The status
+  // line is changed in place (role=status) so it's read out, and so a
+  // countdown doesn't redraw the page each second.
+  const games = { status: '', bad: false, name: '', busy: false, node: null };
+
+  function gameStatus(text, bad = false) {
+    games.status = text;
+    games.bad = bad;
+    if (games.node && games.node.isConnected) {
+      games.node.textContent = text;
+      games.node.className = bad ? 'warn' : 'hint';
+    }
+  }
+
+  const fitKey = () => Bot.host.keyLabel(c().keys.fit);
+
+  // Time to switch to the game before the screen is looked at.
+  async function countdown(what, seconds = 5) {
+    S.navSay(`${what} in ${seconds} seconds. Switch to the game.`);
+    for (let i = seconds; i > 0; i--) {
+      gameStatus(`${what} in ${i}… Switch to the game now.`);
+      await Bot.wait(1000);
+    }
+  }
+
+  // Runs one thing at a time, with the buttons off while it runs.
+  async function busy(fn) {
+    if (games.busy) return;
+    games.busy = true;
+    UI.rerender();
+    try {
+      await fn();
+    } catch (err) {
+      gameStatus(err.message || String(err), true);
+    } finally {
+      games.busy = false;
+      UI.rerender();
+    }
+  }
+
+  function choosePicture(onPicture) {
+    const input = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/bmp', hidden: true });
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      if (file) onPicture(file);
+    });
+    document.body.append(input);
+    input.click();
+  }
+
+  const fitText = (r) => S.fitSummary(r);
+
+  async function fitFrom(getPicture) {
+    await busy(async () => {
+      const picture = await getPicture();
+      if (!picture) return;
+      gameStatus('Looking for the game’s HUD…');
+      const r = await S.fitProfile({ picture });
+      gameStatus(fitText(r), !r.hud);
+      S.navSay(fitText(r));
+    });
+  }
+
+  async function gameFromPicture(getPicture, { live = false } = {}) {
+    await busy(async () => {
+      const picture = await getPicture();
+      if (!picture) return;
+      // Taken from the screen: the program in front is the game.
+      const front = live && S.app ? S.app : null;
+      const name = games.name.trim() || (front && (front.name || front.exe)) || 'New game';
+      gameStatus('Looking for text in the screenshot…');
+      const r = await S.zonesFromPicture(picture, { name, apps: front ? [S.appLabel(front)] : [] });
+      if (r.canceled) {
+        gameStatus(r.lines === undefined ? 'Nothing was made.' : `Not saved. The screenshot had ${r.lines} lines of text, which made ${r.suggested} suggested zones.`);
+        return;
+      }
+      games.name = '';
+      gameStatus(`Made the profile “${r.profile.name}” with ${r.profile.zones.length} zones from ${r.lines} lines of text. It’s in use now. Add the game’s program under Profiles so it’s picked by itself.`);
+    });
+  }
+
+  const pictureFromFile = (file) => () => S.loadPicture(file);
+
+  // A screenshot pasted (Ctrl+V) or dropped on the Games page starts a new game.
+  function pastedPicture(items) {
+    const item = Array.from(items || []).find((x) => x.kind === 'file' && x.type.startsWith('image/'));
+    return item ? item.getAsFile() : null;
+  }
+  document.addEventListener('paste', (e) => {
+    const area = document.querySelector('.sr-drop');
+    if (!area || !area.isConnected || !area.offsetParent || games.busy) return;
+    if (e.target && e.target.matches && e.target.matches('input, textarea') && e.target !== area) return;
+    const file = pastedPicture(e.clipboardData && e.clipboardData.items);
+    if (!file) return;
+    e.preventDefault();
+    gameFromPicture(pictureFromFile(file));
+  });
+
+  function readyMadeSection() {
+    const cfg = c();
+    const rows = S.games.map((g) => {
+      const mine = cfg.profiles.filter((p) => p.game && p.game.id === g.id);
+      const inUse = mine.includes(S.profile());
+      const add = () => {
+        const p = S.addGame(g);
+        const size = S.screenSize(p);
+        gameStatus(`Added ${g.name}: ${p.zones.length} zones, placed for your ${size ? `${size.width}×${size.height} ` : ''}screen and in use now. In the game, press ${fitKey()} to fit them to its HUD.`);
+        S.navSay(`Added ${g.name}.`);
+        UI.rerender();
+      };
+      return {
+        cells: [
+          h('span', {}, h('strong', {}, g.name), g.notes ? h('span', { class: 'hint sr-game-notes' }, g.notes) : null),
+          String(g.zones.length),
+          h('span', { class: 'bot-row-actions' },
+            inUse ? h('span', { class: 'hint' }, 'In use') : null,
+            !inUse && mine.length ? UI.button('Use', () => { cfg.profile = mine[0].id; save(); S.apply({ keys: true }); }) : null,
+            UI.button(mine.length ? 'Add again' : 'Add', add, { cls: mine.length ? 'btn small' : 'btn small primary', aria: `${mine.length ? 'Add again' : 'Add'}: ${g.name}`, disabled: games.busy })),
+        ],
+      };
+    });
+    return UI.section('Ready-made games',
+      UI.lead(`Zones made for a game, ready to use: adding one makes a profile with its zones placed for your screen, and the game’s program, so it’s used by itself when the game comes up. Games draw their HUD at different sizes, so fit the zones to yours afterwards: in the game, press ${fitKey()}.`),
+      UI.table([{ label: 'Game' }, { label: 'Zones', cls: 'num' }, { label: '', cls: 'c-act' }], rows,
+        { empty: 'The ready-made games couldn’t be read.' }));
+  }
+
+  function fitSection() {
+    const cfg = c();
+    const p = S.profile();
+    const can = S.canFit(p);
+    const hud = p.layout ? Math.round(p.layout.scale * 100) : 100;
+    const undo = S.lastFit && S.lastFit.id === p.id;
+    return UI.section('Fit to the game',
+      UI.lead('Finds the game’s HUD in a picture of it, and moves the zones to match: how big the game draws its HUD (its HUD size or UI scale setting), and each number zone onto its number. Zones keep their distance from their corner or edge, so a wider or narrower screen works too.'),
+      profilePicker(),
+      can ? UI.row(
+        UI.button('Fit in 5 seconds', () => fitFrom(async () => { await countdown('Fitting'); return S.grabPicture(); }), { cls: 'btn small primary', disabled: games.busy }),
+        UI.button('Fit from a screenshot…', () => choosePicture((file) => fitFrom(pictureFromFile(file))), { disabled: games.busy }),
+        undo ? UI.button('Undo the fit', () => { S.undoFit(); gameStatus('The zones are back where they were.'); UI.rerender(); }) : null)
+        : h('p', { class: 'hint' }, `“${p.name}” has nothing to fit by: zones you draw yourself stay where you put them. Profiles made from a ready-made game or from a screenshot can be fitted.`),
+      can ? h('p', { class: 'hint' }, `In the game, ${fitKey()} does the same. Fit with the game’s HUD showing, not a menu or a loading screen.`) : null,
+      can ? UI.check(cfg, 'autoFit', 'Fit a game’s zones by itself the first time it comes up, with the screen reader on', { onChange: save }) : null,
+      UI.row(
+        h('span', { class: 'hint' }, `HUD size: ${hud}%${p.fittedAt ? '' : can ? ', not fitted yet' : ''}`),
+        UI.button('Smaller', () => { S.scaleProfile(1 / 1.05); UI.rerender(); }, { aria: 'Make the zones smaller, around their corners', disabled: !p.zones.length }),
+        UI.button('Bigger', () => { S.scaleProfile(1.05); UI.rerender(); }, { aria: 'Make the zones bigger, around their corners', disabled: !p.zones.length })),
+      h('p', { class: 'hint' }, 'Smaller and Bigger do by hand what fitting does, for a game it can’t find: each zone grows or shrinks around its corner or edge, the way a game’s HUD size setting does.'));
+  }
+
+  function newGameSection() {
+    const nameInput = UI.text(games, 'name', { placeholder: 'e.g. Hades II', maxlength: 60 });
+    const drop = h('div', { class: 'sr-drop', tabindex: '0', role: 'group', 'aria-label': 'Paste or drop a screenshot here' },
+      'Or paste a screenshot here (Ctrl+V), or drop its file here.');
+    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      drop.classList.remove('over');
+      const file = [...(e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files : [])].find((f) => f.type.startsWith('image/'));
+      if (file) gameFromPicture(pictureFromFile(file));
+    });
+    return UI.section('A game that isn’t here',
+      UI.lead('Make zones from a screenshot of the game with its HUD showing. The text in it is found and turned into suggested zones (subtitles, chat, objectives, menus, numbers), and the zone editor opens over the screenshot to move, resize, rename or delete them. Saving makes a new profile.'),
+      UI.field('Name of the game', nameInput),
+      UI.row(
+        UI.button('Choose a screenshot…', () => choosePicture((file) => gameFromPicture(pictureFromFile(file))), { cls: 'btn small primary', disabled: games.busy }),
+        UI.button('Take one in 5 seconds', () => gameFromPicture(async () => { await countdown('Screenshot'); return S.grabPicture(); }, { live: true }), { disabled: games.busy })),
+      drop,
+      h('p', { class: 'hint' }, IS_MAC
+        ? 'Shift+Command+4 then Space takes a screenshot of a window; Steam saves one with F12.'
+        : 'Win+Shift+S or Print Screen copies a screenshot to paste here; Steam saves one with F12.'));
+  }
+
+  function shareSection() {
+    const p = S.profile();
+    const exportIt = async () => {
+      const name = `${p.name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'game'}.json`;
+      const r = await Bot.desktop.pickFile({ kind: 'json', save: true, defaultName: name });
+      if (!r || !r.path) return;
+      const res = await Bot.desktop.writeFile({ file: r.path, text: `${JSON.stringify(S.exportGame(p), null, 2)}\n` });
+      gameStatus(res && res.error ? `Couldn’t save it: ${res.error}` : `Saved “${p.name}” as ${r.path.split(/[\\/]/).pop()}.`, !!(res && res.error));
+    };
+    const importIt = async () => {
+      const r = await Bot.desktop.pickFile({ kind: 'json' });
+      if (!r || !r.path) return;
+      const res = await Bot.desktop.readFile(r.path);
+      if (res.error) { gameStatus(`Couldn’t read it: ${res.error}`, true); return; }
+      try {
+        const added = S.importGame(res.text);
+        gameStatus(`Added “${added.name}” with ${added.zones.length} zones, placed for your screen and in use now.`);
+        UI.rerender();
+      } catch (err) {
+        gameStatus(err.message, true);
+      }
+    };
+    return UI.section('Share a game',
+      UI.lead('A game file holds a profile’s zones and the programs it’s for, for anyone to add: a friend, or Chat Reader’s own ready-made games (one file each in screen/games). Voices aren’t in it; each zone gets one when it’s added.'),
+      UI.row(
+        UI.button(`Save “${p.name}” as a game file…`, exportIt, { disabled: !p.zones.length }),
+        UI.button('Add a game file…', importIt)));
+  }
+
+  function gamesSections() {
+    games.node = h('p', { class: games.bad ? 'warn' : 'hint', role: 'status' }, games.status);
+    return [
+      readyMadeSection(),
+      fitSection(),
+      h('div', { class: 'sr-game-status' }, games.node),
+      newGameSection(),
+      shareSection(),
+    ];
+  }
+
   // The page is split into sub-pages (shell.js); show(id) says which
   // sections the one showing has.
   UI.addTab('screen', 'Screen reader', (panel, show) => {
     panel.append(
       ...(show('status') ? overviewSections() : []),
+      ...(show('games') ? gamesSections() : []),
       show('profile') && profileSection(),
       show('zones') && zonesSection(),
       show('cursor') && cursorSection(),

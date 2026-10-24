@@ -14,6 +14,7 @@
 //     what's being read instead of the mouse)
 //   - notices which program is in front, so a game's profile can be picked
 //     by itself when the game comes up
+//   - reads the games with ready-made zones (screen/games/*.json)
 // All three windows are kept out of screen captures, so the reader never
 // reads its own outlines or magnifies its own lens.
 
@@ -250,6 +251,20 @@ async function paddleFiles() {
   }
 }
 
+// The games with ready-made zones: one file each in screen/games, in the
+// format a profile is shared in (bot/screen.js checks each one). A new game
+// is a new file there.
+async function builtInGames() {
+  const dir = path.join(SCREEN_DIR, 'games');
+  let names;
+  try { names = (await fs.promises.readdir(dir)).filter((n) => n.toLowerCase().endsWith('.json')).sort(); } catch { return []; }
+  const games = [];
+  for (const name of names) {
+    try { games.push(JSON.parse(await fs.promises.readFile(path.join(dir, name), 'utf8'))); } catch (err) { console.error(`screen reader game ${name}: ${err.message}`); }
+  }
+  return games;
+}
+
 // ---------------------------------------------------------------------------
 // Windows on top of the game
 // ---------------------------------------------------------------------------
@@ -373,7 +388,9 @@ function closeEditor(result) {
   if (resolve) resolve(result);
 }
 
-function openEditor({ display: displayId, zones = [], modes = [], selected = '', hideMain = false } = {}) {
+// picture: { url, width, height } edits the zones over a screenshot instead
+// of over the screen: a data: URL, shown as big as fits.
+function openEditor({ display: displayId, zones = [], modes = [], selected = '', hideMain = false, picture = null } = {}) {
   if (editor.win) closeEditor({ canceled: true });
   const display = findDisplay(displayId);
   return new Promise((resolve) => {
@@ -396,6 +413,8 @@ function openEditor({ display: displayId, zones = [], modes = [], selected = '',
       modes: Array.isArray(modes) ? modes.slice(0, 20) : [],
       selected,
       platform: process.platform,
+      picture: picture && typeof picture.url === 'string' && picture.url.startsWith('data:image/') && picture.width > 0 && picture.height > 0
+        ? { url: picture.url, width: Number(picture.width), height: Number(picture.height) } : null,
     });
     win.once('ready-to-show', () => {
       win.show();
@@ -628,6 +647,7 @@ function setup(options) {
   });
   ipcMain.handle('screen:ocr', (_event, job) => recognize(job));
   ipcMain.handle('screen:paddle-files', () => paddleFiles());
+  ipcMain.handle('screen:games', () => builtInGames());
   ipcMain.handle('screen:ocr-status', async (_event, { start = false } = {}) => {
     if (start) await startHelper();
     return { running: !!ocr.proc && !ocr.starting, engine: ocr.engine, error: ocr.error, maxSide: ocr.maxSide, supported: !!helperCommand() };
